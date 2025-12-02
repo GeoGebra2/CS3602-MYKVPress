@@ -1,0 +1,17 @@
+model: EleutherAI/pythia-70m
+device: 0
+datasets:
+  - name: wikitext
+    split: test
+  - name: pg19
+    split: test
+modes:
+  - dense
+  - streaming
+  - snapkv
+  - pyramidkv
+compression_ratios: [0.3, 0.5, 0.7, 0.9]
+head_window: 1024
+tail_window: 2048
+max_new_tokens: 256
+output_csv_speed: results/speed.csv
