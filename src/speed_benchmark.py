@@ -5,7 +5,7 @@ import argparse
 import torch
 from transformers import pipeline
 from src.datasets import get_text_sample
-from src.press_runner import create_press
+from src.neox_generate import generate_with_press
 
 def run_benchmark(model_name: str, dataset_name: str, split: str, mode: str, device: int, compression_ratio: float, head_window: int, tail_window: int, max_new_tokens: int, question: str, output_csv: str):
     if torch.cuda.is_available():
@@ -17,14 +17,12 @@ def run_benchmark(model_name: str, dataset_name: str, split: str, mode: str, dev
         out = pipe(context, max_new_tokens=max_new_tokens, do_sample=False)
         end = time.time()
     else:
-        press = create_press(mode, compression_ratio, head_window, tail_window)
-        pipe = pipeline("kv-press-text-generation", model=model_name, device=device)
         context = get_text_sample(dataset_name, split, 0)
         start = time.time()
-        out = pipe(context, question=question, press=press, max_new_tokens=max_new_tokens)
+        ans, gen_elapsed = generate_with_press(model_name, context, question, mode, f"cuda:{device}" if torch.cuda.is_available() else "cpu", compression_ratio, head_window, tail_window, max_new_tokens)
         end = time.time()
     elapsed = max(end - start, 1e-6)
-    tps = float(max_new_tokens) / elapsed
+    tps = float(max_new_tokens) / (gen_elapsed if mode != "dense" else elapsed)
     mem = 0
     if torch.cuda.is_available():
         mem = torch.cuda.max_memory_allocated(device) / (1024 ** 2)

@@ -19,6 +19,9 @@
 - `python src/speed_benchmark.py --model EleutherAI/pythia-70m --dataset pg19 --mode pyramidkv --compression_ratio 0.7 --max_new_tokens 256`
 - `python src/speed_benchmark.py --model EleutherAI/pythia-70m --dataset pg19 --mode streaming --head_window 1024 --tail_window 2048 --max_new_tokens 256`
 
+## 兼容性
+- 若官方 `kvpress` 不支持 Pythia-70M，本仓库已提供自定义实现，直接使用上述 `mode` 即可在 Pythia-70M 上进行 KV 压缩生成与测试。
+
 ## 报告
 - 输出 CSV 包含 PPL、tokens/s、显存峰值，对比 Dense 与压缩方法。
 - 建议展示：

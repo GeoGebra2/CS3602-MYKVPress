@@ -1,4 +1,4 @@
-from kvpress import StreamingLLMPress, SnapKVPress, PyramidKVPress, ExpectedAttentionPress
+from src.custom_press import StreamingLLMPress, SnapKVPress, PyramidKVPress, RandomPress
 
 def create_press(mode: str, compression_ratio: float = None, head_window: int = None, tail_window: int = None):
     if mode == "streaming":
@@ -9,6 +9,6 @@ def create_press(mode: str, compression_ratio: float = None, head_window: int = 
         return SnapKVPress(compression_ratio=compression_ratio or 0.5)
     if mode == "pyramidkv":
         return PyramidKVPress(compression_ratio=compression_ratio or 0.5)
-    if mode == "expected":
-        return ExpectedAttentionPress(compression_ratio=compression_ratio or 0.5)
+    if mode == "random":
+        return RandomPress(compression_ratio=compression_ratio or 0.5)
     return None
