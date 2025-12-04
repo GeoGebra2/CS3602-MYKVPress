@@ -1,24 +1,36 @@
 import time
 import csv
 import os
+import sys
 import argparse
 import torch
 from transformers import pipeline
-from src.datasets import get_text_sample
+from transformers import AutoConfig
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.data import get_text_sample
 from src.press_runner import create_press
 
 def run_benchmark(model_name: str, dataset_name: str, split: str, mode: str, device: int, compression_ratio: float, head_window: int, tail_window: int, max_new_tokens: int, question: str, output_csv: str):
-    if torch.cuda.is_available():
-        torch.cuda.reset_peak_memory_stats(device)
+    use_cuda = torch.cuda.is_available() and isinstance(device, int) and device >= 0
+    if use_cuda:
+        torch.cuda.set_device(device)
+        torch.cuda.reset_peak_memory_stats()
     if mode == "dense":
-        pipe = pipeline("text-generation", model=model_name, device=device)
+        pipe_device = device if use_cuda else -1
+        pipe = pipeline("text-generation", model=model_name, device=pipe_device)
         context = get_text_sample(dataset_name, split, 0)
         start = time.time()
         out = pipe(context, max_new_tokens=max_new_tokens, do_sample=False)
         end = time.time()
     else:
+        cfg = AutoConfig.from_pretrained(model_name)
+        supported = {"LlamaForCausalLM", "MistralForCausalLM", "Phi3ForCausalLM", "Qwen2ForCausalLM", "Qwen3ForCausalLM", "Gemma3ForConditionalGeneration"}
+        archs = cfg.architectures or []
+        if not any(a in supported for a in archs):
+            raise ValueError(f"unsupported kvpress model: {archs}")
         press = create_press(mode, compression_ratio, head_window, tail_window)
-        pipe = pipeline("kv-press-text-generation", model=model_name, device=device)
+        pipe_device = device if use_cuda else -1
+        pipe = pipeline("kv-press-text-generation", model=model_name, device=pipe_device)
         context = get_text_sample(dataset_name, split, 0)
         start = time.time()
         out = pipe(context, question=question, press=press, max_new_tokens=max_new_tokens)
@@ -26,8 +38,8 @@ def run_benchmark(model_name: str, dataset_name: str, split: str, mode: str, dev
     elapsed = max(end - start, 1e-6)
     tps = float(max_new_tokens) / elapsed
     mem = 0
-    if torch.cuda.is_available():
-        mem = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+    if use_cuda:
+        mem = torch.cuda.max_memory_allocated() / (1024 ** 2)
     d = os.path.dirname(output_csv)
     if d and not os.path.exists(d):
         os.makedirs(d, exist_ok=True)

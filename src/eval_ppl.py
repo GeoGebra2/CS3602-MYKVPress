@@ -1,8 +1,11 @@
 import math
 import argparse
+import os
+import sys
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from src.datasets import get_dataset
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.data import get_dataset
 
 def compute_ppl(model_name: str, dataset_name: str, split: str, stride: int, max_length: int, device: str):
     tok = AutoTokenizer.from_pretrained(model_name)
