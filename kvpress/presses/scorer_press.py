@@ -93,7 +93,7 @@ class ScorerPress(BasePress):
         k_len = keys.shape[2]
         n_kept = int(k_len * (1 - self.compression_ratio))
         indices = scores.topk(n_kept, dim=-1).indices
-        indices = indices.unsqueeze(-1).expand(-1, -1, -1, module.head_dim)
+        indices = indices.unsqueeze(-1).expand(-1, -1, -1, keys.shape[-1])
 
         # Prune keys and values
         keys = keys.gather(2, indices).contiguous()

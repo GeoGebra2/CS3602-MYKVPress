@@ -117,14 +117,24 @@ class DecodingPress(BasePress):
         3. Applies compression every N steps
         4. Clears the buffer after compression
         """
-        hidden_states = kwargs["hidden_states"]
-        cache = kwargs["past_key_values"]
-        q_len = hidden_states.shape[1]
-        layer_idx = module.layer_idx
+        hidden_states = kwargs.get("hidden_states", input[0] if len(input) > 0 else None)
+        if hidden_states is None:
+            return output
 
-        # Only operate during decoding phase (after prefilling)
-        if kwargs["cache_position"][-1] <= q_len:
-            # We're still in prefilling phase, don't do anything
+        cache = kwargs.get("past_key_values") or kwargs.get("layer_past") or kwargs.get("past_key_value")
+        if cache is None:
+            return output
+
+        q_len = hidden_states.shape[1]
+        layer_idx = getattr(module, "layer_idx", None)
+        if layer_idx is None:
+            return output
+
+        # Determine phase robustly: decoding when KV length exceeds current query length
+        keys, values = extract_keys_and_values(cache, layer_idx)
+        kv_len = keys.shape[2]
+        if kv_len <= q_len:
+            # Still in prefilling, skip decoding compression
             return output
         # print(f"Adding hidden states to buffer: {hidden_states.shape}")
         # Add current hidden states to buffer for this layer
@@ -139,8 +149,9 @@ class DecodingPress(BasePress):
                 f"Applying decoding compression: layer_step_count ({self.layer_step_counts[layer_idx]}) >= compression_steps ({self.compression_interval})"  # noqa: E501
             )
 
-            cache_layer = cache.layers[module.layer_idx]
-            keys, values = extract_keys_and_values(cache, module.layer_idx)
+            cache_layer = cache.layers[layer_idx]
+            # Re-extract latest keys/values for this layer
+            keys, values = extract_keys_and_values(cache, layer_idx)
 
             # Get attention weights from output
             attentions = output[1] if len(output) > 1 and output[1] is not None else None

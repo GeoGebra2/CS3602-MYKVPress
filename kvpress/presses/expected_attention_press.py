@@ -108,19 +108,39 @@ class ExpectedAttentionPress(ScorerPress):
             The covariance matrix of the queries after RoPE.
         """
         position_ids = torch.arange(q_len, q_len + self.n_future_positions).unsqueeze(0).to(mu.device)
-        head_dim = module.head_dim
+        head_dim = getattr(module, "head_dim", getattr(module, "head_size", module.config.hidden_size // module.config.num_attention_heads))
         cos, sin = module.rotary_emb(mu, position_ids)
         cos, sin = cos[0], sin[0]
-        Id = torch.eye(head_dim, device=cos.device, dtype=cos.dtype)
-        P = torch.zeros((head_dim, head_dim), device=cos.device, dtype=cos.dtype)
-        P[head_dim // 2 :, : head_dim // 2], P[: head_dim // 2, head_dim // 2 :] = torch.eye(head_dim // 2), -torch.eye(
-            head_dim // 2
-        )
-        R = cos.unsqueeze(1) * Id + sin.unsqueeze(1) * P
+
+        rope_dim = cos.shape[-1]
+        Id_rope = torch.eye(rope_dim, device=cos.device, dtype=cos.dtype)
+        P = torch.zeros((rope_dim, rope_dim), device=cos.device, dtype=cos.dtype)
+        half = rope_dim // 2
+        P[half:, :half] = torch.eye(half)
+        P[:half, half:] = -torch.eye(half)
+        R = cos.unsqueeze(1) * Id_rope + sin.unsqueeze(1) * P
         R = R.mean(dim=0).to(mu.device)
-        mu = torch.matmul(mu, R.T)
+
+        # Apply average RoPE only on the rotary sub-dimension
+        mu_left = mu[..., :rope_dim]
+        mu_right = mu[..., rope_dim:]
+        mu_left = torch.matmul(mu_left, R.T)
+        mu = torch.cat([mu_left, mu_right], dim=-1)
+
         if cov is not None:
-            cov = torch.matmul(R, torch.matmul(cov, R.T))
+            # Update top-left block of covariance
+            cov_ll = cov[..., :rope_dim, :rope_dim]
+            cov_lr = cov[..., :rope_dim, rope_dim:]
+            cov_rl = cov[..., rope_dim:, :rope_dim]
+            cov_rr = cov[..., rope_dim:, rope_dim:]
+            cov_ll = torch.matmul(R, torch.matmul(cov_ll, R.T))
+            cov = torch.cat(
+                [
+                    torch.cat([cov_ll, cov_lr], dim=-1),
+                    torch.cat([cov_rl, cov_rr], dim=-1),
+                ],
+                dim=-2,
+            )
         return mu, cov
 
     def score(

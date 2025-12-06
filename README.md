@@ -53,16 +53,13 @@ pip install datasets
 WikiText‑103 基线（不压缩）：
 
 ```bash
-python evaluation/perplexity.py --model EleutherAI/pythia-70m \
-  --dataset wikitext --subset wikitext-103-v1 --press no_press --attn_implementation eager
+python evaluation/perplexity.py --model EleutherAI/pythia-70m --dataset wikitext --subset wikitext-103-v1 --press no_press --attn_implementation eager
 ```
 
 WikiText‑103 压缩示例（SnapKV，压缩比例 0.5）：
 
 ```bash
-python evaluation/perplexity.py --model EleutherAI/pythia-70m \
-  --dataset wikitext --subset wikitext-103-v1 \
-  --press snapkv --compression_ratio 0.5 --attn_implementation eager
+python evaluation/perplexity.py --model EleutherAI/pythia-70m --dataset wikitext --subset wikitext-103-v1 --press snapkv --compression_ratio 0.5 --attn_implementation eager
 ```
 
 PG‑19（超长文本，取单一样本）基线与压缩：

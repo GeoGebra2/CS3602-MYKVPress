@@ -131,17 +131,21 @@ class BasePress:
             The potentially modified output from the forward pass. This
             is the same as the input output, but the underlying cache has been compressed in-place.
         """
+        hidden_states = kwargs.get("hidden_states", input[0] if len(input) > 0 else None)
+        if hidden_states is None:
+            return output
 
-        hidden_states = kwargs["hidden_states"]
-        cache = kwargs["past_key_values"]
+        cache = kwargs.get("past_key_values") or kwargs.get("layer_past") or kwargs.get("past_key_value")
+        if cache is None:
+            return output
+
         cache_layer = cache.layers[module.layer_idx]
         q_len = hidden_states.shape[1]
 
-        # Don't compress after pre-filling
-        if kwargs["cache_position"][-1] > q_len:
-            return output
-
         keys, values = extract_keys_and_values(cache, module.layer_idx)
+
+        if keys.shape[2] != q_len:
+            return output
 
         keys, values = self.compress(module, hidden_states, keys, values, output[1], kwargs)
 

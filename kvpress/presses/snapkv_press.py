@@ -11,7 +11,7 @@ from torch.nn import functional as F
 from transformers.models.llama.modeling_llama import repeat_kv, rotate_half
 
 from kvpress.presses.scorer_press import ScorerPress
-from kvpress.utils import get_prerope_query_states
+from kvpress.utils import get_prerope_query_states, get_prerope_key_states
 
 
 @dataclass
@@ -46,19 +46,29 @@ class SnapKVPress(ScorerPress):
 
         bsz, _, k_len, _ = keys.shape
         num_heads = module.config.num_attention_heads
-        head_dim = module.head_dim
-        num_key_value_groups = num_heads // module.config.num_key_value_heads
+        head_dim = getattr(module, "head_dim", getattr(module, "head_size", module.config.hidden_size // num_heads))
+        num_kv_heads = getattr(module.config, "num_key_value_heads", num_heads)
+        num_key_value_groups = num_heads // num_kv_heads
 
         # Get last window_size queries
         query_states = get_prerope_query_states(module, hidden_states[:, -window_size:])
-
-        # Apply RoPE
-        cos, sin = position_embeddings
-        cos, sin = cos[:, -window_size:], sin[:, -window_size:]
-        query_states = (query_states * cos.unsqueeze(1)) + (rotate_half(query_states) * sin.unsqueeze(1))
+        if position_embeddings is not None:
+            cos, sin = position_embeddings
+            cos, sin = cos[:, -window_size:], sin[:, -window_size:]
+            rope_dim = cos.shape[-1]
+            if rope_dim == query_states.shape[-1]:
+                query_states = (query_states * cos.unsqueeze(1)) + (rotate_half(query_states) * sin.unsqueeze(1))
+            else:
+                left = query_states[..., :rope_dim]
+                right = query_states[..., rope_dim:]
+                left = (left * cos.unsqueeze(1)) + (rotate_half(left) * sin.unsqueeze(1))
+                query_states = torch.cat([left, right], dim=-1)
 
         # Compute attention for first q_len - window_size tokens
-        key_states = repeat_kv(keys, num_key_value_groups)
+        if position_embeddings is None:
+            key_states = get_prerope_key_states(module, hidden_states)
+        else:
+            key_states = repeat_kv(keys, num_key_value_groups)
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(head_dim)
         attention_mask = torch.ones_like(attn_weights) * float("-inf")
         attention_mask = torch.triu(attention_mask, diagonal=k_len - window_size + 1)

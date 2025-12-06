@@ -1,0 +1,18 @@
+{
+  "model": "EleutherAI/pythia-70m",
+  "dataset": "wikitext",
+  "subset": null,
+  "sample_idx": null,
+  "tokens": 286220,
+  "loss": null,
+  "ppl": null,
+  "press": "duo_attention",
+  "compression_ratio": null,
+  "attn_implementation": null,
+  "speed_tokens_per_s": null,
+  "peak_mem_bytes": null,
+  "residual_mem_bytes": null,
+  "context_tokens": null,
+  "context_tokens_truncated": null,
+  "error": "Checkpoint EleutherAI/pythia-70m not in ['togethercomputer/Llama-2-7B-32K-Instruct', 'gradientai//Llama-3-8B-Instruct-Gradient-1048k', 'gradientai//Llama-3-8B-Instruct-Gradient-4194k', 'meta-llama/Meta-Llama-3.1-8B-Instruct', 'mistralai/Mistral-7B-Instruct-v0.2', 'mistralai/Mistral-7B-Instruct-v0.3']"
+}

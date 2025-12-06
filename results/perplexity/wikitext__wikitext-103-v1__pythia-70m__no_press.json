@@ -1,0 +1,17 @@
+{
+  "model": "EleutherAI/pythia-70m",
+  "dataset": "wikitext",
+  "subset": "wikitext-103-v1",
+  "sample_idx": null,
+  "tokens": 286220,
+  "loss": null,
+  "ppl": null,
+  "press": "no_press",
+  "compression_ratio": null,
+  "attn_implementation": null,
+  "speed_tokens_per_s": 102.05755841572174,
+  "peak_mem_bytes": 537769984,
+  "residual_mem_bytes": 293565440,
+  "context_tokens": 286220,
+  "context_tokens_truncated": 4096
+}

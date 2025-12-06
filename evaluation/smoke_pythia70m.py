@@ -11,7 +11,7 @@ def main():
     pipe = pipeline("kv-press-text-generation", model=model, device=device)
     context = "Pythia-70M smoke test context. " * 50
     press = KnormPress(compression_ratio=0.5)
-    out = pipe(context, question="", press=press, max_new_tokens=8)
+    out = pipe(context, question="What does the context say?", press=press, max_new_tokens=8)
     print(out)
 
 

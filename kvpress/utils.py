@@ -34,7 +34,7 @@ def get_prerope_query_states(module: nn.Module, hidden_states: torch.Tensor) -> 
     """
     bsz, q_len, _ = hidden_states.shape
     num_heads = module.config.num_attention_heads
-    head_dim = module.head_dim
+    head_dim = getattr(module, "head_dim", getattr(module, "head_size", module.config.hidden_size // num_heads))
 
     if isinstance(module, Phi3Attention):
         qkv = module.qkv_proj(hidden_states)
@@ -80,15 +80,15 @@ def get_prerope_key_states(module: nn.Module, hidden_states: torch.Tensor) -> to
         The extracted key states of shape (batch_size, num_heads, seq_len, head_dim).
     """
     bsz, k_len, _ = hidden_states.shape
-    head_dim = module.head_dim
+    head_dim = getattr(module, "head_dim", getattr(module, "head_size", module.config.hidden_size // module.config.num_attention_heads))
     if isinstance(module, Phi3Attention):
         qkv = module.qkv_proj(hidden_states)
-        query_pos = module.config.num_attention_heads * module.head_dim
-        key_states = qkv[..., query_pos : query_pos + module.num_key_value_heads * module.head_dim]
+        query_pos = module.config.num_attention_heads * head_dim
+        key_states = qkv[..., query_pos : query_pos + module.num_key_value_heads * head_dim]
     elif isinstance(module, GPTNeoXAttention):
         qkv = module.query_key_value(hidden_states)
-        query_pos = module.config.num_attention_heads * module.head_dim
-        key_states = qkv[..., query_pos : query_pos + module.config.num_attention_heads * module.head_dim]
+        query_pos = module.config.num_attention_heads * head_dim
+        key_states = qkv[..., query_pos : query_pos + module.config.num_attention_heads * head_dim]
     elif hasattr(module, "k_proj"):
         # Assume Llama-like attention layer
         key_states = module.k_proj(hidden_states)
