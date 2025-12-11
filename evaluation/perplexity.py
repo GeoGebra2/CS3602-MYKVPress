@@ -196,7 +196,7 @@ def measure_speed_memory(
 
 def main():
     parser = argparse.ArgumentParser(description="Perplexity and acceleration evaluation for Pythia-70M with KVPress")
-    parser.add_argument("--model", type=str, default="EleutherAI/pythia-70m")
+    parser.add_argument("--model", type=str, default="EleutherAI/pythia-2.8b")
     parser.add_argument("--dataset", type=str, choices=["wikitext", "pg19"], required=True)
     parser.add_argument("--subset", type=str, default=None)
     parser.add_argument("--sample_idx", type=int, default=None)

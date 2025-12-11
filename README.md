@@ -62,6 +62,12 @@ WikiText‑103 压缩示例（SnapKV，压缩比例 0.5）：
 python evaluation/perplexity.py --model EleutherAI/pythia-70m --dataset wikitext --subset wikitext-103-v1 --press snapkv --compression_ratio 0.5 --attn_implementation eager
 ```
 
+- 一键批跑（默认 max_new_tokens=200 ，上下文截断为 --context_limit ，默认 4096）：
+  - python evaluation/perplexity.py --dataset wikitext --press all --speed_only
+- 单方法示例（SnapKV，压缩率 0.5）：
+  - python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_ratio 0.5 --speed_only
+提示
+
 PG‑19（超长文本，取单一样本）基线与压缩：
 
 ```bash
