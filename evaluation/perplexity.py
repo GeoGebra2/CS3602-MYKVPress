@@ -7,6 +7,7 @@ import math
 import os
 import time
 from dataclasses import asdict, dataclass
+import contextlib
 
 import torch
 from datasets import load_dataset
@@ -48,16 +49,16 @@ PRESS_CHOICES = {
     "critical_adakv_snapkv": CriticalAdaKVPress(SnapKVPress()),
     "critical_expected_attention": CriticalKVPress(ExpectedAttentionPress(use_vnorm=False)),
     "critical_snapkv": CriticalKVPress(SnapKVPress()),
-    "duo_attention": DuoAttentionPress(),
-    "duo_attention_on_the_fly": DuoAttentionPress(on_the_fly_scoring=True),
+    #"duo_attention": DuoAttentionPress(),
+    #"duo_attention_on_the_fly": DuoAttentionPress(on_the_fly_scoring=True),
     "expected_attention": ExpectedAttentionPress(),
-    "finch": FinchPress(),
+    #"finch": FinchPress(),
     "keydiff": KeyDiffPress(),
-    "kvzip": KVzipPress(),
+    #"kvzip": KVzipPress(),
     "knorm": KnormPress(),
-    "observed_attention": ObservedAttentionPress(),
+    #"observed_attention": ObservedAttentionPress(),
     "pyramidkv": PyramidKVPress(),
-    "qfilter": QFilterPress(),
+    #"qfilter": QFilterPress(),
     "random": RandomPress(),
     "snap_think": ComposedPress([SnapKVPress(), ThinKPress()]),
     "snapkv": SnapKVPress(),
@@ -70,7 +71,7 @@ PRESS_CHOICES = {
     "decoding_knorm": DecodingPress(base_press=KnormPress()),
     "decoding_streaming_llm": DecodingPress(base_press=StreamingLLMPress()),
     "decoding_tova": DecodingPress(base_press=TOVAPress()),
-    "decoding_qfilter": DecodingPress(base_press=QFilterPress()),
+    #"decoding_qfilter": DecodingPress(base_press=QFilterPress()),
     "decoding_adakv_expected_attention_e2": DecodingPress(base_press=AdaKVPress(ExpectedAttentionPress(epsilon=1e-2))),
     "decoding_adakv_snapkv": DecodingPress(base_press=AdaKVPress(SnapKVPress())),
     "decoding_keydiff": DecodingPress(base_press=KeyDiffPress()),
@@ -117,6 +118,8 @@ def compute_ppl(
     device: str,
     max_seq_len: int = 2048,
     stride: int = 512,
+    press=None,
+    attn_impl: str | None = None,
 ) -> tuple[float, float, int]:
     ids = tokenizer.encode(text, return_tensors="pt", add_special_tokens=False).to(device)
     n_toks = ids.size(1)
@@ -136,7 +139,22 @@ def compute_ppl(
             if trg_len <= 0:
                 continue
             labels[:, :-trg_len] = -100
-            outputs = model(input_ids=input_ids, labels=labels)
+            output_attentions = False
+            if press is not None:
+                try:
+                    from kvpress.presses.observed_attention_press import ObservedAttentionPress
+                    if isinstance(press, ObservedAttentionPress) or (
+                        hasattr(press, "press") and isinstance(press.press, ObservedAttentionPress)
+                    ):
+                        output_attentions = True
+                        try:
+                            model.config._attn_implementation = "eager"
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            with press(model) if press is not None else contextlib.nullcontext():
+                outputs = model(input_ids=input_ids, labels=labels, output_attentions=output_attentions)
             nll = outputs.loss * trg_len
             nlls.append(nll)
             total += trg_len
@@ -204,29 +222,57 @@ def main():
     parser.add_argument("--attn_implementation", type=str, default=None)
     parser.add_argument("--press", type=str, default=None, choices=list(PRESS_CHOICES.keys()) + ["all"])
     parser.add_argument("--compression_ratio", type=float, default=None)
-    parser.add_argument("--max_new_tokens", type=int, default=200)
+    parser.add_argument("--max_new_tokens", type=int, default=20000)
     parser.add_argument("--max_seq_len", type=int, default=2048)
     parser.add_argument("--stride", type=int, default=512)
     parser.add_argument("--output_dir", type=str, default="results/perplexity")
     parser.add_argument("--context_limit", type=int, default=4096)
     parser.add_argument("--question", type=str, default="Write a concise summary of the context.")
     parser.add_argument("--answer_prefix", type=str, default="Answer: ")
+    parser.add_argument("--ppl_apply_press", action="store_true")
     parser.add_argument("--speed_only", action="store_true")
     args = parser.parse_args()
 
+    print(f"Loading model: {args.model}...", flush=True)
     device = args.device
     model = AutoModelForCausalLM.from_pretrained(args.model).to(device)
     tokenizer = AutoTokenizer.from_pretrained(args.model)
+    print("Model loaded.", flush=True)
+    print(f"Loading dataset: {args.dataset}...", flush=True)
     text = load_text(args.dataset, args.subset, args.sample_idx)
+    print("Dataset loaded.", flush=True)
 
     if args.speed_only:
         ids = tokenizer.encode(text, return_tensors="pt", add_special_tokens=False).to(device)
         ntoks = ids.size(1)
         loss, ppl = None, None
     else:
+        print("Computing perplexity...", flush=True)
+        press_for_ppl = None
+        if args.ppl_apply_press and args.press and args.press != "all" and args.press in PRESS_CHOICES:
+            press_for_ppl = PRESS_CHOICES[args.press]
+            if press_for_ppl is not None and args.compression_ratio is not None:
+                if hasattr(press_for_ppl, "compression_ratio"):
+                    try:
+                        press_for_ppl.compression_ratio = args.compression_ratio
+                    except Exception:
+                        pass
+                elif hasattr(press_for_ppl, "base_press") and hasattr(press_for_ppl.base_press, "compression_ratio"):
+                    try:
+                        press_for_ppl.base_press.compression_ratio = args.compression_ratio
+                    except Exception:
+                        pass
         loss, ppl, ntoks = compute_ppl(
-            model, tokenizer, text, device, max_seq_len=args.max_seq_len, stride=args.stride
+            model,
+            tokenizer,
+            text,
+            device,
+            max_seq_len=args.max_seq_len,
+            stride=args.stride,
+            press=press_for_ppl,
+            attn_impl=args.attn_implementation,
         )
+        print(f"Perplexity computed. Loss={loss:.4f}, PPL={ppl:.4f}", flush=True)
 
     speed, peak_mem, ctx_tokens = None, None, None
     residual_mem = None
@@ -235,6 +281,7 @@ def main():
         if args.press == "all":
             os.makedirs(args.output_dir, exist_ok=True)
             for press_name in PRESS_CHOICES.keys():
+                print(f"Running press: {press_name}", flush=True)
                 attn_impl_i = "eager" if press_name == "observed_attention" else args.attn_implementation
                 try:
                     speed_i, peak_mem_i, ctx_tokens_i = measure_speed_memory(
