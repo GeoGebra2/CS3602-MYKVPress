@@ -103,7 +103,9 @@ class PyramidKVPress(SnapKVPress):
         k_len = keys.shape[2]
         n_kept = self.get_layer_budget(module, k_len)
         indices = scores.topk(n_kept, dim=-1).indices
-        indices = indices.unsqueeze(-1).expand(-1, -1, -1, module.head_dim)
+        num_heads = module.config.num_attention_heads
+        head_dim = getattr(module, "head_dim", getattr(module, "head_size", module.config.hidden_size // num_heads))
+        indices = indices.unsqueeze(-1).expand(-1, -1, -1, head_dim)
 
         # Prune keys and values
         keys = keys.gather(2, indices).contiguous()
