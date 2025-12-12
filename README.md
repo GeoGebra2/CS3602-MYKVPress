@@ -77,6 +77,9 @@ python evaluation/perplexity.py --model EleutherAI/pythia-70m --dataset wikitext
   - 当你指定了 --ppl_apply_press 且 --press 不是 all 时，PPL计算会在该压缩方法的上下文中执行（ compute_ppl 内部对模型前向加了压缩的钩子）。
   - 这仍然是“教师强制”的PPL，而不是先生成再评估，因为生成不会用于PPL计算。
 
+  批量在 PPL 阶段应用压缩并评测速度：
+- python evaluation/perplexity.py --dataset wikitext --press all --ppl_apply_press
+
 PG‑19（超长文本，取单一样本）基线与压缩：
 
 ```bash

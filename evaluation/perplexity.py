@@ -40,9 +40,9 @@ from kvpress import (
 
 
 PRESS_CHOICES = {
-    "adakv_expected_attention": AdaKVPress(ExpectedAttentionPress()),
-    "adakv_expected_attention_e2": AdaKVPress(ExpectedAttentionPress(epsilon=1e-2)),
-    "adakv_snapkv": AdaKVPress(SnapKVPress()),
+    #"adakv_expected_attention": AdaKVPress(ExpectedAttentionPress()),
+    #"adakv_expected_attention_e2": AdaKVPress(ExpectedAttentionPress(epsilon=1e-2)),
+    #"adakv_snapkv": AdaKVPress(SnapKVPress()),
     "block_keydiff": BlockPress(press=KeyDiffPress(), block_size=128),
     "chunkkv": ChunkKVPress(press=SnapKVPress(), chunk_length=20),
     "critical_adakv_expected_attention": CriticalAdaKVPress(ExpectedAttentionPress(use_vnorm=False)),
@@ -66,7 +66,7 @@ PRESS_CHOICES = {
     "think": ThinKPress(),
     "tova": TOVAPress(),
     "compactor": CompactorPress(),
-    "adakv_compactor": AdaKVPress(CompactorPress()),
+    #"adakv_compactor": AdaKVPress(CompactorPress()),
     "no_press": None,
     "decoding_knorm": DecodingPress(base_press=KnormPress()),
     "decoding_streaming_llm": DecodingPress(base_press=StreamingLLMPress()),
@@ -221,7 +221,7 @@ def main():
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--attn_implementation", type=str, default=None)
     parser.add_argument("--press", type=str, default=None, choices=list(PRESS_CHOICES.keys()) + ["all"])
-    parser.add_argument("--compression_ratio", type=float, default=None)
+    parser.add_argument("--compression_ratio", type=float, default=0.7)
     parser.add_argument("--max_new_tokens", type=int, default=20000)
     parser.add_argument("--max_seq_len", type=int, default=2048)
     parser.add_argument("--stride", type=int, default=512)
@@ -284,6 +284,32 @@ def main():
                 print(f"Running press: {press_name}", flush=True)
                 attn_impl_i = "eager" if press_name == "observed_attention" else args.attn_implementation
                 try:
+                    # Optionally compute PPL under each press
+                    loss_i, ppl_i = loss, ppl
+                    if not args.speed_only and args.ppl_apply_press:
+                        press_for_ppl_i = PRESS_CHOICES.get(press_name)
+                        if press_for_ppl_i is not None and args.compression_ratio is not None:
+                            if hasattr(press_for_ppl_i, "compression_ratio"):
+                                try:
+                                    press_for_ppl_i.compression_ratio = args.compression_ratio
+                                except Exception:
+                                    pass
+                            elif hasattr(press_for_ppl_i, "base_press") and hasattr(press_for_ppl_i.base_press, "compression_ratio"):
+                                try:
+                                    press_for_ppl_i.base_press.compression_ratio = args.compression_ratio
+                                except Exception:
+                                    pass
+                        print(f"Computing perplexity with press: {press_name}", flush=True)
+                        loss_i, ppl_i, _ = compute_ppl(
+                            model,
+                            tokenizer,
+                            text,
+                            device,
+                            max_seq_len=args.max_seq_len,
+                            stride=args.stride,
+                            press=press_for_ppl_i,
+                            attn_impl=attn_impl_i,
+                        )
                     speed_i, peak_mem_i, ctx_tokens_i = measure_speed_memory(
                         model_name=args.model,
                         device=device,
@@ -303,8 +329,8 @@ def main():
                         subset=args.subset,
                         sample_idx=args.sample_idx,
                         tokens=ntoks,
-                        loss=loss,
-                        ppl=ppl,
+                        loss=loss_i,
+                        ppl=ppl_i,
                         press=press_name,
                         compression_ratio=args.compression_ratio,
                         attn_implementation=args.attn_implementation,

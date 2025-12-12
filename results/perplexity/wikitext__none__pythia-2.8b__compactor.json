@@ -9,7 +9,7 @@
   "press": "compactor",
   "compression_ratio": null,
   "attn_implementation": null,
-  "speed_tokens_per_s": 0.6263110576485605,
+  "speed_tokens_per_s": 0.6336139592758756,
   "peak_mem_bytes": 18342539264,
   "residual_mem_bytes": 11180327936,
   "context_tokens": 286220,

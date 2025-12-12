@@ -9,7 +9,7 @@
   "press": "keydiff",
   "compression_ratio": null,
   "attn_implementation": null,
-  "speed_tokens_per_s": 0.6108590282552059,
+  "speed_tokens_per_s": 0.6333879840638925,
   "peak_mem_bytes": 18342539264,
   "residual_mem_bytes": 11180327936,
   "context_tokens": 286220,

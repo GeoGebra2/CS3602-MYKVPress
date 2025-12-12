@@ -9,7 +9,7 @@
   "press": "decoding_tova",
   "compression_ratio": null,
   "attn_implementation": null,
-  "speed_tokens_per_s": 0.6261198506309797,
+  "speed_tokens_per_s": 0.6319231202140633,
   "peak_mem_bytes": 18400538624,
   "residual_mem_bytes": 11267326976,
   "context_tokens": 286220,

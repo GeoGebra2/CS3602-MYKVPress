@@ -9,7 +9,7 @@
   "press": "critical_adakv_snapkv",
   "compression_ratio": null,
   "attn_implementation": null,
-  "speed_tokens_per_s": 0.5755859808783238,
+  "speed_tokens_per_s": 0.6335243904351507,
   "peak_mem_bytes": 18342539264,
   "residual_mem_bytes": 11180327936,
   "context_tokens": 286220,

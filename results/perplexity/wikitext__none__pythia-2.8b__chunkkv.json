@@ -9,7 +9,7 @@
   "press": "chunkkv",
   "compression_ratio": null,
   "attn_implementation": null,
-  "speed_tokens_per_s": 0.5757943380713962,
+  "speed_tokens_per_s": 0.6276162402879605,
   "peak_mem_bytes": 18342539264,
   "residual_mem_bytes": 11180327936,
   "context_tokens": 286220,

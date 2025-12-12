@@ -9,7 +9,7 @@
   "press": "knorm",
   "compression_ratio": null,
   "attn_implementation": null,
-  "speed_tokens_per_s": 0.6125853220786324,
+  "speed_tokens_per_s": 0.6318203514139799,
   "peak_mem_bytes": 18342539264,
   "residual_mem_bytes": 11180327936,
   "context_tokens": 286220,

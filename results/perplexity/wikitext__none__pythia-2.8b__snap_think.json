@@ -9,9 +9,9 @@
   "press": "snap_think",
   "compression_ratio": null,
   "attn_implementation": null,
-  "speed_tokens_per_s": 0.5855437189902793,
-  "peak_mem_bytes": 26410525184,
-  "residual_mem_bytes": 19264960000,
+  "speed_tokens_per_s": 0.6311908881902925,
+  "peak_mem_bytes": 18342539264,
+  "residual_mem_bytes": 11180327936,
   "context_tokens": 286220,
   "context_tokens_truncated": 4096,
   "error": null

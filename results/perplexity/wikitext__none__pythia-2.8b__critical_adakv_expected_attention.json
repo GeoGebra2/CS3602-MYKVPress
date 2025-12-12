@@ -9,7 +9,7 @@
   "press": "critical_adakv_expected_attention",
   "compression_ratio": null,
   "attn_implementation": null,
-  "speed_tokens_per_s": 0.5403990299067122,
+  "speed_tokens_per_s": 0.6334346420387096,
   "peak_mem_bytes": 18342539264,
   "residual_mem_bytes": 11180327936,
   "context_tokens": 286220,
