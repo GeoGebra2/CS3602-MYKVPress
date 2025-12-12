@@ -43,15 +43,15 @@ PRESS_CHOICES = {
     #"adakv_expected_attention": AdaKVPress(ExpectedAttentionPress()),
     #"adakv_expected_attention_e2": AdaKVPress(ExpectedAttentionPress(epsilon=1e-2)),
     #"adakv_snapkv": AdaKVPress(SnapKVPress()),
-    "block_keydiff": BlockPress(press=KeyDiffPress(), block_size=128),
-    "chunkkv": ChunkKVPress(press=SnapKVPress(), chunk_length=20),
-    "critical_adakv_expected_attention": CriticalAdaKVPress(ExpectedAttentionPress(use_vnorm=False)),
-    "critical_adakv_snapkv": CriticalAdaKVPress(SnapKVPress()),
-    "critical_expected_attention": CriticalKVPress(ExpectedAttentionPress(use_vnorm=False)),
-    "critical_snapkv": CriticalKVPress(SnapKVPress()),
+    # "block_keydiff": BlockPress(press=KeyDiffPress(), block_size=128),
+    # "chunkkv": ChunkKVPress(press=SnapKVPress(), chunk_length=20),
+    # "critical_adakv_expected_attention": CriticalAdaKVPress(ExpectedAttentionPress(use_vnorm=False)),
+    # "critical_adakv_snapkv": CriticalAdaKVPress(SnapKVPress()),
+    # "critical_expected_attention": CriticalKVPress(ExpectedAttentionPress(use_vnorm=False)),
+    # "critical_snapkv": CriticalKVPress(SnapKVPress()),
     #"duo_attention": DuoAttentionPress(),
     #"duo_attention_on_the_fly": DuoAttentionPress(on_the_fly_scoring=True),
-    "expected_attention": ExpectedAttentionPress(),
+    # "expected_attention": ExpectedAttentionPress(),
     #"finch": FinchPress(),
     "keydiff": KeyDiffPress(),
     #"kvzip": KVzipPress(),
@@ -60,21 +60,21 @@ PRESS_CHOICES = {
     "pyramidkv": PyramidKVPress(),
     #"qfilter": QFilterPress(),
     "random": RandomPress(),
-    "snap_think": ComposedPress([SnapKVPress(), ThinKPress()]),
+    # "snap_think": ComposedPress([SnapKVPress(), ThinKPress()]),
     "snapkv": SnapKVPress(),
     "streaming_llm": StreamingLLMPress(),
-    "think": ThinKPress(),
-    "tova": TOVAPress(),
-    "compactor": CompactorPress(),
+    # "think": ThinKPress(),
+    # "tova": TOVAPress(),
+    # "compactor": CompactorPress(),
     #"adakv_compactor": AdaKVPress(CompactorPress()),
     "no_press": None,
-    "decoding_knorm": DecodingPress(base_press=KnormPress()),
-    "decoding_streaming_llm": DecodingPress(base_press=StreamingLLMPress()),
-    "decoding_tova": DecodingPress(base_press=TOVAPress()),
-    #"decoding_qfilter": DecodingPress(base_press=QFilterPress()),
-    "decoding_adakv_expected_attention_e2": DecodingPress(base_press=AdaKVPress(ExpectedAttentionPress(epsilon=1e-2))),
-    "decoding_adakv_snapkv": DecodingPress(base_press=AdaKVPress(SnapKVPress())),
-    "decoding_keydiff": DecodingPress(base_press=KeyDiffPress()),
+    # "decoding_knorm": DecodingPress(base_press=KnormPress()),
+    # "decoding_streaming_llm": DecodingPress(base_press=StreamingLLMPress()),
+    # "decoding_tova": DecodingPress(base_press=TOVAPress()),
+    # #"decoding_qfilter": DecodingPress(base_press=QFilterPress()),
+    # "decoding_adakv_expected_attention_e2": DecodingPress(base_press=AdaKVPress(ExpectedAttentionPress(epsilon=1e-2))),
+    # "decoding_adakv_snapkv": DecodingPress(base_press=AdaKVPress(SnapKVPress())),
+    # "decoding_keydiff": DecodingPress(base_press=KeyDiffPress()),
 }
 
 
@@ -174,6 +174,8 @@ def measure_speed_memory(
     max_new_tokens: int = 50,
     context_limit: int = 8192,
     answer_prefix: str | None = None,
+    speed_decode_only: bool = False,
+    min_new_tokens: int = 0,
 ) -> tuple[float, int, int]:
     model_kwargs = {}
     if attn_impl:
@@ -203,9 +205,12 @@ def measure_speed_memory(
         max_new_tokens=max_new_tokens,
         max_context_length=context_limit,
         answer_prefix=answer_prefix or "",
+        min_new_tokens=min_new_tokens,
     )
-    elapsed = time.perf_counter() - start
+    elapsed_total = time.perf_counter() - start
     generated = pipe.tokenizer.encode(out["answer"], add_special_tokens=False)
+    decode_elapsed = getattr(pipe, "_last_decode_elapsed_seconds", None)
+    elapsed = decode_elapsed if (speed_decode_only and decode_elapsed is not None) else elapsed_total
     tok_per_s = len(generated) / elapsed if elapsed > 0 else float("nan")
     peak_mem = torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
     ctx_len = pipe.tokenizer.encode(context, add_special_tokens=False)
@@ -231,6 +236,8 @@ def main():
     parser.add_argument("--answer_prefix", type=str, default="")
     parser.add_argument("--ppl_apply_press", action="store_true")
     parser.add_argument("--speed_only", action="store_true")
+    parser.add_argument("--speed_decode_only", action="store_true")
+    parser.add_argument("--min_new_tokens", type=int, default=0)
     args = parser.parse_args()
 
     print(f"Loading model: {args.model}...", flush=True)
@@ -321,6 +328,8 @@ def main():
                         max_new_tokens=args.max_new_tokens,
                         context_limit=args.context_limit,
                         answer_prefix=args.answer_prefix,
+                        speed_decode_only=args.speed_decode_only,
+                        min_new_tokens=args.min_new_tokens,
                     )
                     residual_mem_i = int(torch.cuda.memory_allocated()) if torch.cuda.is_available() else 0
                     result_i = EvalResult(
@@ -377,6 +386,8 @@ def main():
             max_new_tokens=args.max_new_tokens,
             context_limit=args.context_limit,
             answer_prefix=args.answer_prefix,
+            speed_decode_only=args.speed_decode_only,
+            min_new_tokens=args.min_new_tokens,
         )
         residual_mem = int(torch.cuda.memory_allocated()) if torch.cuda.is_available() else 0
 

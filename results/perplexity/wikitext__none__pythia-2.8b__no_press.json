@@ -9,7 +9,7 @@
   "press": "no_press",
   "compression_ratio": 0.7,
   "attn_implementation": null,
-  "speed_tokens_per_s": 0.46648704164485905,
+  "speed_tokens_per_s": 0.5876267250142979,
   "peak_mem_bytes": 18342539264,
   "residual_mem_bytes": 11180327936,
   "context_tokens": 286220,

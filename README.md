@@ -80,6 +80,13 @@ python evaluation/perplexity.py --model EleutherAI/pythia-70m --dataset wikitext
   批量在 PPL 阶段应用压缩并评测速度：
 - python evaluation/perplexity.py --dataset wikitext --press all --ppl_apply_press
 
+- 仅统计解码阶段吞吐（避免预填充影响）：
+- python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_ratio 0.5 --speed_only --speed_decode_only
+- 防止早停稳定吞吐：
+- python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_ratio 0.5 --speed_only --min_new_tokens 32
+- 两者同时启用：
+- python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_ratio 0.5 --speed_only --speed_decode_only --min_new_tokens 32
+
 PG‑19（超长文本，取单一样本）基线与压缩：
 
 ```bash

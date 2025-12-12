@@ -5,6 +5,7 @@
 import contextlib
 import logging
 from typing import Optional
+import time
 
 import torch
 from transformers import AutoModelForCausalLM, Cache, DynamicCache, Pipeline, QuantizedCache
@@ -43,6 +44,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         answer_prefix: Optional[str] = None,
         press: Optional[BasePress] = None,
         max_new_tokens: int = 50,
+        min_new_tokens: Optional[int] = None,
         max_context_length: Optional[int] = None,
         cache: Optional[Cache] = None,
         **kwargs,
@@ -94,7 +96,12 @@ class KVPressTextGenerationPipeline(Pipeline):
             "answer_prefix": answer_prefix,
             "max_context_length": max_context_length,
         }
-        forward_kwargs = {"press": press, "max_new_tokens": max_new_tokens, "cache": cache}
+        forward_kwargs = {
+            "press": press,
+            "max_new_tokens": max_new_tokens,
+            "min_new_tokens": (min_new_tokens or 0),
+            "cache": cache,
+        }
         return preprocess_kwargs, forward_kwargs, postprocess_kwargs
 
     def preprocess(
@@ -166,6 +173,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         self,
         input_tensors: dict[str, GenericTensor],
         max_new_tokens: int = 50,
+        min_new_tokens: int = 0,
         press: Optional[BasePress] = None,
         cache: Optional[Cache] = None,
     ):
@@ -235,6 +243,7 @@ class KVPressTextGenerationPipeline(Pipeline):
 
         # We only perform decoding compression if the press is a decoding or prefill decoding press
         perform_decoding_compression = press is not None and isinstance(press, (DecodingPress, PrefillDecodingPress))
+        decode_start = time.perf_counter()
         with press(self.model) if perform_decoding_compression else contextlib.nullcontext():
             # Greedy decoding for each question
             answers = []
@@ -248,10 +257,20 @@ class KVPressTextGenerationPipeline(Pipeline):
                     cache=cache,
                     context_length=context_length,
                     max_new_tokens=max_new_tokens,
+                    min_new_tokens=min_new_tokens,
                 )
                 self._remove_answer_from_cache(cache, cache_seq_lengths)
 
                 answers.append(answer)
+        decode_elapsed = time.perf_counter() - decode_start
+        try:
+            self._last_decode_elapsed_seconds = decode_elapsed
+            self._last_decode_generated_tokens = sum(
+                len(self.tokenizer.encode(ans, add_special_tokens=False)) for ans in answers
+            )
+        except Exception:
+            self._last_decode_elapsed_seconds = None
+            self._last_decode_generated_tokens = None
         return answers
 
     def _remove_answer_from_cache(self, cache: Cache, cache_seq_lengths: list[int]):
@@ -270,7 +289,7 @@ class KVPressTextGenerationPipeline(Pipeline):
                 ]
 
     def generate_answer(
-        self, question_ids: torch.Tensor, cache: Cache, context_length: int, max_new_tokens: int
+        self, question_ids: torch.Tensor, cache: Cache, context_length: int, max_new_tokens: int, min_new_tokens: int = 0
     ) -> str:
         """
         Generate an answer to a question using greedy decoding.
@@ -310,6 +329,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         if not isinstance(should_stop_token_ids, list):
             should_stop_token_ids = [should_stop_token_ids]
 
+        min_new_tokens = min(max(min_new_tokens, 0), max_new_tokens)
         for i in range(max_new_tokens - 1):
             outputs = self.model(
                 input_ids=generated_ids[-1].unsqueeze(0).unsqueeze(0),
@@ -318,7 +338,7 @@ class KVPressTextGenerationPipeline(Pipeline):
             )
             new_id = outputs.logits[0, -1].argmax()
             generated_ids.append(new_id)
-            if new_id.item() in should_stop_token_ids:
+            if (i + 1) >= min_new_tokens and new_id.item() in should_stop_token_ids:
                 break
         answer = self.tokenizer.decode(torch.stack(generated_ids), skip_special_tokens=True)
         return answer
