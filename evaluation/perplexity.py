@@ -10,9 +10,11 @@ from dataclasses import asdict, dataclass
 import contextlib
 
 import torch
+import torch.nn.functional as F
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers import pipeline
+from transformers import DynamicCache
 from kvpress import (
     AdaKVPress,
     BlockPress,
@@ -120,6 +122,7 @@ def compute_ppl(
     stride: int = 512,
     press=None,
     attn_impl: str | None = None,
+    ppl_fast: bool = False,
 ) -> tuple[float, float, int]:
     ids = tokenizer.encode(text, return_tensors="pt", add_special_tokens=False).to(device)
     n_toks = ids.size(1)
@@ -134,30 +137,76 @@ def compute_ppl(
             begin = max(i + stride - max_seq_len, 0)
             end = min(i + stride, n_toks)
             trg_len = end - i
-            input_ids = ids[:, begin:end]
-            labels = input_ids.clone()
             if trg_len <= 0:
                 continue
-            labels[:, :-trg_len] = -100
+            if press is None:
+                input_ids = ids[:, begin:end]
+                labels = input_ids.clone()
+                labels[:, :-trg_len] = -100
+                outputs = model(input_ids=input_ids, labels=labels, output_attentions=False)
+                nll = outputs.loss * trg_len
+                nlls.append(nll)
+                total += trg_len
+                continue
             output_attentions = False
-            if press is not None:
-                try:
-                    from kvpress.presses.observed_attention_press import ObservedAttentionPress
-                    if isinstance(press, ObservedAttentionPress) or (
-                        hasattr(press, "press") and isinstance(press.press, ObservedAttentionPress)
-                    ):
-                        output_attentions = True
-                        try:
-                            model.config._attn_implementation = "eager"
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            with press(model) if press is not None else contextlib.nullcontext():
-                outputs = model(input_ids=input_ids, labels=labels, output_attentions=output_attentions)
-            nll = outputs.loss * trg_len
-            nlls.append(nll)
-            total += trg_len
+            try:
+                from kvpress.presses.observed_attention_press import ObservedAttentionPress
+                if isinstance(press, ObservedAttentionPress) or (
+                    hasattr(press, "press") and isinstance(press.press, ObservedAttentionPress)
+                ):
+                    output_attentions = True
+                    try:
+                        model.config._attn_implementation = "eager"
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            cache = DynamicCache()
+            prefix = ids[:, begin:i]
+            with press(model):
+                base = None
+                if hasattr(model, "model"):
+                    base = model.model
+                    base = base.language_model if hasattr(base, "language_model") else base
+                elif hasattr(model, "gpt_neox"):
+                    base = model.gpt_neox
+                else:
+                    base = None
+                if prefix.shape[1] > 0:
+                    if base is not None:
+                        base(input_ids=prefix, past_key_values=cache, output_attentions=output_attentions)
+                    else:
+                        model(input_ids=prefix, past_key_values=cache, output_attentions=output_attentions)
+            base_seq_len = prefix.shape[1]
+            if ppl_fast:
+                suffix = ids[:, i:end]
+                if i > 0:
+                    full_ids = torch.cat([ids[:, i - 1 : i], suffix], dim=1)
+                    pos_start = base_seq_len - 1
+                else:
+                    full_ids = suffix
+                    pos_start = base_seq_len
+                position_ids = torch.arange(pos_start, pos_start + full_ids.shape[1], device=device).unsqueeze(0)
+                outputs = model(
+                    input_ids=full_ids, past_key_values=cache, position_ids=position_ids, labels=full_ids
+                )
+                effective_len = full_ids.shape[1] - 1
+                nll = outputs.loss * effective_len
+                nlls.append(nll)
+                total += effective_len
+            else:
+                t_start = max(i, 1)
+                for t in range(t_start, end):
+                    last_token = ids[:, t - 1 : t]
+                    added = t - i
+                    last_token_pos = base_seq_len + added - 1
+                    position_ids = torch.tensor([[last_token_pos]], device=device)
+                    outputs = model(input_ids=last_token, past_key_values=cache, position_ids=position_ids)
+                    log_probs = F.log_softmax(outputs.logits[:, -1, :], dim=-1)
+                    target_id = ids[:, t : t + 1]
+                    token_logprob = log_probs.gather(dim=-1, index=target_id).squeeze(-1)
+                    nlls.append(-token_logprob)
+                    total += 1
     loss = float(torch.stack(nlls).sum() / total) if total > 0 else float("nan")
     ppl = math.exp(loss) if not math.isnan(loss) else float("nan")
     return loss, ppl, n_toks
@@ -229,15 +278,17 @@ def main():
     parser.add_argument("--compression_ratio", type=float, default=0.7)
     parser.add_argument("--max_new_tokens", type=int, default=800)
     parser.add_argument("--max_seq_len", type=int, default=2048)
-    parser.add_argument("--stride", type=int, default=512)
+    parser.add_argument("--stride", type=int, default=1792)
     parser.add_argument("--output_dir", type=str, default="results/perplexity")
     parser.add_argument("--context_limit", type=int, default=4096)
     parser.add_argument("--question", type=str, default="Continue the context with a detailed summary of at least 3 sentences.")
     parser.add_argument("--answer_prefix", type=str, default="")
     parser.add_argument("--ppl_apply_press", action="store_true")
+    parser.add_argument("--ppl_only_press", action="store_true")
+    parser.add_argument("--ppl_fast", action="store_true")
     parser.add_argument("--speed_only", action="store_true")
     parser.add_argument("--speed_decode_only", action="store_true")
-    parser.add_argument("--min_new_tokens", type=int, default=0)
+    parser.add_argument("--min_new_tokens", type=int, default=32)
     args = parser.parse_args()
 
     print(f"Loading model: {args.model}...", flush=True)
@@ -254,32 +305,53 @@ def main():
         ntoks = ids.size(1)
         loss, ppl = None, None
     else:
-        print("Computing perplexity...", flush=True)
         press_for_ppl = None
-        if args.ppl_apply_press and args.press and args.press != "all" and args.press in PRESS_CHOICES:
-            press_for_ppl = PRESS_CHOICES[args.press]
-            if press_for_ppl is not None and args.compression_ratio is not None:
-                if hasattr(press_for_ppl, "compression_ratio"):
-                    try:
-                        press_for_ppl.compression_ratio = args.compression_ratio
-                    except Exception:
-                        pass
-                elif hasattr(press_for_ppl, "base_press") and hasattr(press_for_ppl.base_press, "compression_ratio"):
-                    try:
-                        press_for_ppl.base_press.compression_ratio = args.compression_ratio
-                    except Exception:
-                        pass
-        loss, ppl, ntoks = compute_ppl(
-            model,
-            tokenizer,
-            text,
-            device,
-            max_seq_len=args.max_seq_len,
-            stride=args.stride,
-            press=press_for_ppl,
-            attn_impl=args.attn_implementation,
-        )
-        print(f"Perplexity computed. Loss={loss:.4f}, PPL={ppl:.4f}", flush=True)
+        if args.press == "all" and args.ppl_only_press:
+            ids = tokenizer.encode(text, return_tensors="pt", add_special_tokens=False).to(device)
+            ntoks = ids.size(1)
+            loss, ppl = None, None
+        else:
+            if args.ppl_only_press and args.press and args.press != "all" and args.press in PRESS_CHOICES:
+                press_for_ppl = PRESS_CHOICES[args.press]
+                if press_for_ppl is not None and args.compression_ratio is not None:
+                    if hasattr(press_for_ppl, "compression_ratio"):
+                        try:
+                            press_for_ppl.compression_ratio = args.compression_ratio
+                        except Exception:
+                            pass
+                    elif hasattr(press_for_ppl, "base_press") and hasattr(press_for_ppl.base_press, "compression_ratio"):
+                        try:
+                            press_for_ppl.base_press.compression_ratio = args.compression_ratio
+                        except Exception:
+                            pass
+                print(f"Computing perplexity with press: {args.press}", flush=True)
+            else:
+                print("Computing perplexity...", flush=True)
+                if args.ppl_apply_press and args.press and args.press != "all" and args.press in PRESS_CHOICES:
+                    press_for_ppl = PRESS_CHOICES[args.press]
+                    if press_for_ppl is not None and args.compression_ratio is not None:
+                        if hasattr(press_for_ppl, "compression_ratio"):
+                            try:
+                                press_for_ppl.compression_ratio = args.compression_ratio
+                            except Exception:
+                                pass
+                        elif hasattr(press_for_ppl, "base_press") and hasattr(press_for_ppl.base_press, "compression_ratio"):
+                            try:
+                                press_for_ppl.base_press.compression_ratio = args.compression_ratio
+                            except Exception:
+                                pass
+            loss, ppl, ntoks = compute_ppl(
+                model,
+                tokenizer,
+                text,
+                device,
+                max_seq_len=args.max_seq_len,
+                stride=args.stride,
+                press=press_for_ppl,
+                attn_impl=args.attn_implementation,
+                ppl_fast=args.ppl_fast,
+            )
+            print(f"Perplexity computed. Loss={loss:.4f}, PPL={ppl:.4f}", flush=True)
 
     speed, peak_mem, ctx_tokens = None, None, None
     residual_mem = None
@@ -293,7 +365,7 @@ def main():
                 try:
                     # Optionally compute PPL under each press
                     loss_i, ppl_i = loss, ppl
-                    if not args.speed_only and args.ppl_apply_press:
+                    if not args.speed_only and (args.ppl_apply_press or args.ppl_only_press):
                         press_for_ppl_i = PRESS_CHOICES.get(press_name)
                         if press_for_ppl_i is not None and args.compression_ratio is not None:
                             if hasattr(press_for_ppl_i, "compression_ratio"):
@@ -316,6 +388,7 @@ def main():
                             stride=args.stride,
                             press=press_for_ppl_i,
                             attn_impl=attn_impl_i,
+                            ppl_fast=args.ppl_fast,
                         )
                     speed_i, peak_mem_i, ctx_tokens_i = measure_speed_memory(
                         model_name=args.model,
