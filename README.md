@@ -15,7 +15,7 @@
 安装：
 
 ```bash
-pip install -e .
+pip install -e . 
 pip install datasets
 ```
 
