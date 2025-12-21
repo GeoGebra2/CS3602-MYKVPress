@@ -43,6 +43,21 @@ python evaluation/perplexity.py --dataset wikitext --press all --speed_only
 python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_ratio 0.5 --ppl_apply_press
 ```
 
+- 使用 PG‑19 官方数据集：
+
+```bash
+python evaluation/perplexity.py --dataset pg19 --sample_idx 0 --press snapkv --compression_ratio 0.7 --ppl_only_press --ppl_fast
+```
+
+- 使用本地 PG‑19 样本 JSON（默认路径已指向仓库内样本集）：
+
+```bash
+python evaluation/perplexity.py --dataset pg19_local --press snapkv --compression_ratio 0.7 --ppl_only_press --ppl_fast
+# 或指定文件路径与样本索引
+python evaluation/perplexity.py --dataset pg19_local --data_path d:\kvpress\pg19_samples\pg19_10samples.json --sample_idx 3 \
+  --press snapkv --compression_ratio 0.7 --ppl_only_press --ppl_fast
+```
+
 - 仅计算“压缩后”的 PPL（跳过未压缩基线）：
 
 ```bash
@@ -63,6 +78,7 @@ python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_
 
 ## 关键选项
 
+- `--dataset`：选择评测语料来源，支持 `wikitext`、`pg19`、`pg19_local`。`pg19_local` 读取本地 JSON 样本。
 - `--press`：选择压缩方法或 `no_press`。脚本内已启用的方法包括：`snapkv`、`knorm`、`keydiff`、`pyramidkv`、`random`、`streaming_llm`、`no_press`。`--press all` 批量评测当前启用集合。
 - `--compression_ratio`：压缩比例（移除的 KV 对占比）。不同方法会以各自策略应用该比例。
 - `--attn_implementation`：注意力实现。`eager` 在通用环境下更稳定；`flash_attention_2` 需要安装 `flash-attn`（建议 Linux/WSL2）。
@@ -75,6 +91,7 @@ python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_
 - `--speed_decode_only`：只统计“解码阶段”的耗时（不包含预填充与压缩），适合更稳定的吞吐度量。
 - `--min_new_tokens`：解码前 `N` 个 token 忽略 EOS，避免早停导致吞吐不稳定。
 - `--max_seq_len` 与 `--stride`：PPL 的滑窗设置。增大 `--stride`（接近 `--max_seq_len`）可减少重复预填充与压缩的成本，整体更快。
+- `--data_path`：当 `--dataset pg19_local` 时，指定本地 JSON 样本路径；缺省为仓库默认样本。
 
 示例（稳定吞吐的设置）：
 
@@ -107,6 +124,17 @@ python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_
   - 压缩后 PPL 快速/标准路径：`evaluation/perplexity.py:150-193`
   - `--press all` 下仅压缩 PPL 的执行分支：`evaluation/perplexity.py:358-389`
 
+### PG‑19 与本地样本
+
+- 官方数据集加载：`evaluation/perplexity.py:109-112`（`load_text('pg19', ...)`）
+- 本地 JSON 样本加载：`evaluation/perplexity.py:113-125`（`load_text('pg19_local', ...)`）
+- 默认本地样本路径为仓库根下：`d:\kvpress\pg19_samples\pg19_10samples.json`（无需显式传 `--data_path`）
+- 指定单本样本：通过 `--sample_idx` 选择 `[0..N-1]` 的一条记录；不指定时将合并所有 `text`
+- 离线使用（可选环境变量）：
+  - `HF_DATASETS_OFFLINE=1`（数据集离线）
+  - `HF_HUB_OFFLINE=1`（模型离线）
+  - 自定义缓存目录：`HF_DATASETS_CACHE`、`TRANSFORMERS_CACHE`
+
 ## 模型与架构支持
 
 - 已在 GPT‑NeoX 架构适配（Pythia 系列），基础语言模型路径跨架构选择，见 `kvpress/pipeline.py:214-216`。
@@ -122,4 +150,3 @@ python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_
 
 - 代码基于 Apache‑2.0 许可使用与发布。
 - 致谢 NVIDIA KVPress 与 Hugging Face 生态。
-
