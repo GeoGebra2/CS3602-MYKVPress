@@ -100,7 +100,7 @@ class EvalResult:
     error: str | None
 
 
-def load_text(dataset: str, subset: str | None, sample_idx: int | None) -> str:
+def load_text(dataset: str, subset: str | None, sample_idx: int | None, data_path: str | None = None) -> str:
     if dataset == "wikitext":
         subset = subset or "wikitext-103-v1"
         ds = load_dataset("wikitext", subset, split="test")
@@ -110,6 +110,18 @@ def load_text(dataset: str, subset: str | None, sample_idx: int | None) -> str:
         ds = load_dataset("pg19", split="test")
         idx = sample_idx or 0
         return ds[int(idx)]["book_text"]
+    if dataset == "pg19_local":
+        project_root = os.path.dirname(os.path.dirname(__file__))
+        default_path = os.path.join(project_root, "pg19_samples", "pg19_10samples.json")
+        path = data_path or default_path
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if sample_idx is None:
+            texts = [x.get("text", "") for x in data]
+            return "\n\n".join(texts)
+        idx = int(sample_idx)
+        item = data[idx]
+        return item.get("text", "")
     raise ValueError(f"Unsupported dataset: {dataset}")
 
 
@@ -269,7 +281,7 @@ def measure_speed_memory(
 def main():
     parser = argparse.ArgumentParser(description="Perplexity and acceleration evaluation for Pythia-70M with KVPress")
     parser.add_argument("--model", type=str, default="EleutherAI/pythia-2.8b")
-    parser.add_argument("--dataset", type=str, choices=["wikitext", "pg19"], required=True)
+    parser.add_argument("--dataset", type=str, choices=["wikitext", "pg19", "pg19_local"], required=True)
     parser.add_argument("--subset", type=str, default=None)
     parser.add_argument("--sample_idx", type=int, default=None)
     parser.add_argument("--device", type=str, default="cuda:0")
@@ -278,7 +290,7 @@ def main():
     parser.add_argument("--compression_ratio", type=float, default=0.7)
     parser.add_argument("--max_new_tokens", type=int, default=800)
     parser.add_argument("--max_seq_len", type=int, default=2048)
-    parser.add_argument("--stride", type=int, default=1792)
+    parser.add_argument("--stride", type=int, default=512)
     parser.add_argument("--output_dir", type=str, default="results/perplexity")
     parser.add_argument("--context_limit", type=int, default=4096)
     parser.add_argument("--question", type=str, default="Continue the context with a detailed summary of at least 3 sentences.")
@@ -289,6 +301,7 @@ def main():
     parser.add_argument("--speed_only", action="store_true")
     parser.add_argument("--speed_decode_only", action="store_true")
     parser.add_argument("--min_new_tokens", type=int, default=32)
+    parser.add_argument("--data_path", type=str, default=None)
     args = parser.parse_args()
 
     print(f"Loading model: {args.model}...", flush=True)
@@ -297,7 +310,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     print("Model loaded.", flush=True)
     print(f"Loading dataset: {args.dataset}...", flush=True)
-    text = load_text(args.dataset, args.subset, args.sample_idx)
+    text = load_text(args.dataset, args.subset, args.sample_idx, args.data_path)
     print("Dataset loaded.", flush=True)
 
     if args.speed_only:

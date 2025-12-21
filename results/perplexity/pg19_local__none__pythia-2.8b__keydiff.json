@@ -1,0 +1,18 @@
+{
+  "model": "EleutherAI/pythia-2.8b",
+  "dataset": "pg19_local",
+  "subset": null,
+  "sample_idx": 3,
+  "tokens": 2510,
+  "loss": 3.1736857891082764,
+  "ppl": 23.895395634657778,
+  "press": "keydiff",
+  "compression_ratio": 0.7,
+  "attn_implementation": null,
+  "speed_tokens_per_s": 1.2733532880384062,
+  "peak_mem_bytes": 17264628736,
+  "residual_mem_bytes": 11178058240,
+  "context_tokens": 2510,
+  "context_tokens_truncated": 2510,
+  "error": null
+}
