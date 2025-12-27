@@ -25,70 +25,49 @@ pip install datasets
 
 使用脚本：`evaluation/perplexity.py`
 
-- 单方法速度/显存（SnapKV，压缩率 0.5，仅统计速度）：
+- 单方法速度/显存与压缩后 PPL（Streaming‑LLM，压缩率 0.5）：
 
 ```bash
-python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_ratio 0.5 --speed_only
+python evaluation/perplexity.py --dataset wikitext --press streaming_llm --compression_ratio 0.5
 ```
 
-- 一键批跑全部已启用方法（上下文截断默认 `--context_limit 4096`，默认 `--max_new_tokens 800`）：
+- 一键批跑全部已启用方法（默认仅计算“压缩后”PPL，同时记录速度/显存；上下文截断默认 `--context_limit 4096`，默认 `--max_new_tokens 800`）：
 
 ```bash
-python evaluation/perplexity.py --dataset wikitext --press all --speed_only
+python evaluation/perplexity.py --dataset wikitext --press all --compression_ratio 0.7
 ```
 
-- 在 PPL 阶段应用压缩（评估质量是否受影响）：
+- 仅计算未压缩的基线 PPL（不应用压缩）：
 
 ```bash
-python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_ratio 0.5 --ppl_apply_press
+python evaluation/perplexity.py --dataset wikitext --press no_press
 ```
 
 - 使用 PG‑19 官方数据集：
 
 ```bash
-python evaluation/perplexity.py --dataset pg19 --sample_idx 0 --press snapkv --compression_ratio 0.7 --ppl_only_press --ppl_fast
+python evaluation/perplexity.py --dataset pg19 --sample_idx 0 --press streaming_llm --compression_ratio 0.7
 ```
 
 - 使用本地 PG‑19 样本 JSON（默认路径已指向仓库内样本集）：
 
 ```bash
-python evaluation/perplexity.py --dataset pg19_local --press snapkv --compression_ratio 0.7 --ppl_only_press --ppl_fast
+python evaluation/perplexity.py --dataset pg19_local --press streaming_llm --compression_ratio 0.7
 # 或指定文件路径与样本索引
 python evaluation/perplexity.py --dataset pg19_local --data_path d:\kvpress\pg19_samples\pg19_10samples.json --sample_idx 3 \
-  --press snapkv --compression_ratio 0.7 --ppl_only_press --ppl_fast
+  --press streaming_llm --compression_ratio 0.7
 ```
 
-- 仅计算“压缩后”的 PPL（跳过未压缩基线）：
-
-```bash
-python evaluation/perplexity.py --dataset wikitext --press all --compression_ratio 0.7 --ppl_only_press
-```
-
-- 加速“压缩后 PPL”计算（批量损失，建议与上条组合）：
-
-```bash
-python evaluation/perplexity.py --dataset wikitext --press all --compression_ratio 0.7 --ppl_only_press --ppl_fast
-```
-
-- 单方法“压缩后 PPL”且加速：
-
-```bash
-python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_ratio 0.7 --ppl_only_press --ppl_fast
-```
+- 说明：脚本已默认在压缩方法下计算 PPL，且启用快速批损耗路径；在 `--press all` 时只计算各方法的“压缩后 PPL”，不再计算未压缩基线。若需基线，请单独运行 `--press no_press`。
 
 ## 关键选项
 
 - `--dataset`：选择评测语料来源，支持 `wikitext`、`pg19`、`pg19_local`。`pg19_local` 读取本地 JSON 样本。
-- `--press`：选择压缩方法或 `no_press`。脚本内已启用的方法包括：`snapkv`、`knorm`、`keydiff`、`pyramidkv`、`random`、`streaming_llm`、`no_press`。`--press all` 批量评测当前启用集合。
+- `--press`：选择压缩方法或 `no_press`。脚本当前启用的方法包括：`knorm`、`keydiff`、`random`、`streaming_llm`、`no_press`。`--press all` 批量评测当前启用集合。
 - `--compression_ratio`：压缩比例（移除的 KV 对占比）。不同方法会以各自策略应用该比例。
-- `--attn_implementation`：注意力实现。`eager` 在通用环境下更稳定；`flash_attention_2` 需要安装 `flash-attn`（建议 Linux/WSL2）。
 - `--context_limit`：上下文最大 Token 数（默认 4096）。这是输入截断，不是滑窗注意力。
 - `--max_new_tokens`：生成长度（默认 800）。
-- `--ppl_apply_press`：在 PPL 计算期间应用压缩（教师强制，不做生成）。
-- `--ppl_only_press`：只计算“压缩后”的 PPL，跳过未压缩基线。适用于 `--press all` 和单方法。
-- `--ppl_fast`：启用压缩后 PPL 的快速路径，按窗口批量计算损失，显著减少前向次数；数值与逐 token 路径保持一致。
-- `--speed_only`：仅跑速度与显存（不计算 PPL）。
-- `--speed_decode_only`：只统计“解码阶段”的耗时（不包含预填充与压缩），适合更稳定的吞吐度量。
+- 速度统计默认为“解码阶段”（decode‑only），无需显式开关。
 - `--min_new_tokens`：解码前 `N` 个 token 忽略 EOS，避免早停导致吞吐不稳定。
 - `--max_seq_len` 与 `--stride`：PPL 的滑窗设置。增大 `--stride`（接近 `--max_seq_len`）可减少重复预填充与压缩的成本，整体更快。
 - `--data_path`：当 `--dataset pg19_local` 时，指定本地 JSON 样本路径；缺省为仓库默认样本。
@@ -96,8 +75,8 @@ python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_
 示例（稳定吞吐的设置）：
 
 ```bash
-python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_ratio 0.5 \
-  --speed_only --speed_decode_only --min_new_tokens 32
+python evaluation/perplexity.py --dataset wikitext --press streaming_llm --compression_ratio 0.5 \
+  --min_new_tokens 32 --max_new_tokens 800
 ```
 
 ## `no_press` 行为说明
@@ -110,19 +89,17 @@ python evaluation/perplexity.py --dataset wikitext --press snapkv --compression_
 每次运行会在控制台打印并保存到 `results/perplexity/*.json`，字段包括：
 
 - `model`、`dataset`、`press`、`compression_ratio`
-- `loss`、`ppl`（仅在非 `--speed_only`）
-- `speed_tokens_per_s`（可选择 `--speed_decode_only` 统计解码吞吐）
+- `loss`、`ppl`
+- `speed_tokens_per_s`（默认统计“解码阶段”吞吐）
 - `peak_mem_bytes`（峰值显存，CUDA）与 `residual_mem_bytes`（运行结束时显存占用）
 - `context_tokens` 与 `context_tokens_truncated`（实际 vs 截断后上下文长度）
 
 ### 关于“压缩后 PPL”的实现与性能
 
-- 压缩在“预填充阶段”通过 forward hook 生效，随后在增量解码上评估 `log p(token | 压缩上下文)`。
-- 快速路径 `--ppl_fast` 使用教师强制的批量损失计算，减少逐 token 前向次数；与标准逐步路径数值一致。
-- 代码参考：
-  - 新增参数注册：`evaluation/perplexity.py:287-291`（`--ppl_only_press`、`--ppl_fast`）
-  - 压缩后 PPL 快速/标准路径：`evaluation/perplexity.py:150-193`
-  - `--press all` 下仅压缩 PPL 的执行分支：`evaluation/perplexity.py:358-389`
+- 压缩在“预填充阶段”通过 forward hook 生效，随后在增量解码上评估 `log p(token | 压缩上下文)`（`d:\kvpress\evaluation\perplexity.py:178-192`）。
+- 快速路径默认开启：使用教师强制的批量损失计算减少前向次数（`d:\kvpress\evaluation\perplexity.py:193-208`）。
+- 位置编码对齐原始前缀长度，避免压缩缓存长度造成混淆（`d:\kvpress\evaluation\perplexity.py:201-206`）。
+- 批量模式（`--press all`）默认仅计算“压缩后 PPL”，不生成未压缩基线。
 
 ### PG‑19 与本地样本
 

@@ -42,41 +42,11 @@ from kvpress import (
 
 
 PRESS_CHOICES = {
-    #"adakv_expected_attention": AdaKVPress(ExpectedAttentionPress()),
-    #"adakv_expected_attention_e2": AdaKVPress(ExpectedAttentionPress(epsilon=1e-2)),
-    #"adakv_snapkv": AdaKVPress(SnapKVPress()),
-    # "block_keydiff": BlockPress(press=KeyDiffPress(), block_size=128),
-    # "chunkkv": ChunkKVPress(press=SnapKVPress(), chunk_length=20),
-    # "critical_adakv_expected_attention": CriticalAdaKVPress(ExpectedAttentionPress(use_vnorm=False)),
-    # "critical_adakv_snapkv": CriticalAdaKVPress(SnapKVPress()),
-    # "critical_expected_attention": CriticalKVPress(ExpectedAttentionPress(use_vnorm=False)),
-    # "critical_snapkv": CriticalKVPress(SnapKVPress()),
-    #"duo_attention": DuoAttentionPress(),
-    #"duo_attention_on_the_fly": DuoAttentionPress(on_the_fly_scoring=True),
-    # "expected_attention": ExpectedAttentionPress(),
-    #"finch": FinchPress(),
     "keydiff": KeyDiffPress(),
-    #"kvzip": KVzipPress(),
     "knorm": KnormPress(),
-    #"observed_attention": ObservedAttentionPress(),
-    #"pyramidkv": PyramidKVPress(),
-    #"qfilter": QFilterPress(),
     "random": RandomPress(),
-    # "snap_think": ComposedPress([SnapKVPress(), ThinKPress()]),
-    #"snapkv": SnapKVPress(),
     "streaming_llm": StreamingLLMPress(),
-    # "think": ThinKPress(),
-    # "tova": TOVAPress(),
-    # "compactor": CompactorPress(),
-    #"adakv_compactor": AdaKVPress(CompactorPress()),
     "no_press": None,
-    # "decoding_knorm": DecodingPress(base_press=KnormPress()),
-    # "decoding_streaming_llm": DecodingPress(base_press=StreamingLLMPress()),
-    # "decoding_tova": DecodingPress(base_press=TOVAPress()),
-    # #"decoding_qfilter": DecodingPress(base_press=QFilterPress()),
-    # "decoding_adakv_expected_attention_e2": DecodingPress(base_press=AdaKVPress(ExpectedAttentionPress(epsilon=1e-2))),
-    # "decoding_adakv_snapkv": DecodingPress(base_press=AdaKVPress(SnapKVPress())),
-    # "decoding_keydiff": DecodingPress(base_press=KeyDiffPress()),
 }
 
 
@@ -133,7 +103,6 @@ def compute_ppl(
     max_seq_len: int = 2048,
     stride: int = 512,
     press=None,
-    attn_impl: str | None = None,
     ppl_fast: bool = False,
 ) -> tuple[float, float, int]:
     ids = tokenizer.encode(text, return_tensors="pt", add_special_tokens=False).to(device)
@@ -231,16 +200,13 @@ def measure_speed_memory(
     question: str,
     press_name: str | None,
     compression_ratio: float | None,
-    attn_impl: str | None,
     max_new_tokens: int = 50,
     context_limit: int = 8192,
     answer_prefix: str | None = None,
-    speed_decode_only: bool = False,
+    speed_decode_only: bool = True,
     min_new_tokens: int = 0,
 ) -> tuple[float, int, int]:
     model_kwargs = {}
-    if attn_impl:
-        model_kwargs["attn_implementation"] = attn_impl
     pipe = pipeline("kv-press-text-generation", model=model_name, device=device, model_kwargs=model_kwargs)
     press = None
     if press_name and press_name in PRESS_CHOICES:
@@ -285,7 +251,6 @@ def main():
     parser.add_argument("--subset", type=str, default=None)
     parser.add_argument("--sample_idx", type=int, default=None)
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--attn_implementation", type=str, default=None)
     parser.add_argument("--press", type=str, default=None, choices=list(PRESS_CHOICES.keys()) + ["all"])
     parser.add_argument("--compression_ratio", type=float, default=0.7)
     parser.add_argument("--max_new_tokens", type=int, default=800)
@@ -295,11 +260,6 @@ def main():
     parser.add_argument("--context_limit", type=int, default=4096)
     parser.add_argument("--question", type=str, default="Continue the context with a detailed summary of at least 3 sentences.")
     parser.add_argument("--answer_prefix", type=str, default="")
-    parser.add_argument("--ppl_apply_press", action="store_true")
-    parser.add_argument("--ppl_only_press", action="store_true")
-    parser.add_argument("--ppl_fast", action="store_true")
-    parser.add_argument("--speed_only", action="store_true")
-    parser.add_argument("--speed_decode_only", action="store_true")
     parser.add_argument("--min_new_tokens", type=int, default=32)
     parser.add_argument("--data_path", type=str, default=None)
     args = parser.parse_args()
@@ -313,96 +273,74 @@ def main():
     text = load_text(args.dataset, args.subset, args.sample_idx, args.data_path)
     print("Dataset loaded.", flush=True)
 
-    if args.speed_only:
-        ids = tokenizer.encode(text, return_tensors="pt", add_special_tokens=False).to(device)
-        ntoks = ids.size(1)
-        loss, ppl = None, None
-    else:
-        press_for_ppl = None
-        if args.press == "all" and args.ppl_only_press:
-            ids = tokenizer.encode(text, return_tensors="pt", add_special_tokens=False).to(device)
-            ntoks = ids.size(1)
-            loss, ppl = None, None
+    ids = tokenizer.encode(text, return_tensors="pt", add_special_tokens=False).to(device)
+    ntoks = ids.size(1)
+    loss, ppl = None, None
+
+    press_for_ppl = None
+    if args.press != "all":
+        if args.press and args.press != "no_press" and args.press in PRESS_CHOICES:
+            press_for_ppl = PRESS_CHOICES[args.press]
+            if press_for_ppl is not None and args.compression_ratio is not None:
+                if hasattr(press_for_ppl, "compression_ratio"):
+                    try:
+                        press_for_ppl.compression_ratio = args.compression_ratio
+                    except Exception:
+                        pass
+                elif hasattr(press_for_ppl, "base_press") and hasattr(press_for_ppl.base_press, "compression_ratio"):
+                    try:
+                        press_for_ppl.base_press.compression_ratio = args.compression_ratio
+                    except Exception:
+                        pass
+            print(f"Computing perplexity with press: {args.press}", flush=True)
         else:
-            if args.ppl_only_press and args.press and args.press != "all" and args.press in PRESS_CHOICES:
-                press_for_ppl = PRESS_CHOICES[args.press]
-                if press_for_ppl is not None and args.compression_ratio is not None:
-                    if hasattr(press_for_ppl, "compression_ratio"):
-                        try:
-                            press_for_ppl.compression_ratio = args.compression_ratio
-                        except Exception:
-                            pass
-                    elif hasattr(press_for_ppl, "base_press") and hasattr(press_for_ppl.base_press, "compression_ratio"):
-                        try:
-                            press_for_ppl.base_press.compression_ratio = args.compression_ratio
-                        except Exception:
-                            pass
-                print(f"Computing perplexity with press: {args.press}", flush=True)
-            else:
-                print("Computing perplexity...", flush=True)
-                if args.ppl_apply_press and args.press and args.press != "all" and args.press in PRESS_CHOICES:
-                    press_for_ppl = PRESS_CHOICES[args.press]
-                    if press_for_ppl is not None and args.compression_ratio is not None:
-                        if hasattr(press_for_ppl, "compression_ratio"):
-                            try:
-                                press_for_ppl.compression_ratio = args.compression_ratio
-                            except Exception:
-                                pass
-                        elif hasattr(press_for_ppl, "base_press") and hasattr(press_for_ppl.base_press, "compression_ratio"):
-                            try:
-                                press_for_ppl.base_press.compression_ratio = args.compression_ratio
-                            except Exception:
-                                pass
-            loss, ppl, ntoks = compute_ppl(
-                model,
-                tokenizer,
-                text,
-                device,
-                max_seq_len=args.max_seq_len,
-                stride=args.stride,
-                press=press_for_ppl,
-                attn_impl=args.attn_implementation,
-                ppl_fast=args.ppl_fast,
-            )
-            print(f"Perplexity computed. Loss={loss:.4f}, PPL={ppl:.4f}", flush=True)
+            print("Computing perplexity...", flush=True)
+        loss, ppl, ntoks = compute_ppl(
+            model,
+            tokenizer,
+            text,
+            device,
+            max_seq_len=args.max_seq_len,
+            stride=args.stride,
+            press=press_for_ppl,
+            ppl_fast=True,
+        )
+        print(f"Perplexity computed. Loss={loss:.4f}, PPL={ppl:.4f}", flush=True)
 
     speed, peak_mem, ctx_tokens = None, None, None
     residual_mem = None
-    if args.speed_only or args.press is not None:
+    if args.press is not None:
         # Support batch run across all presses
         if args.press == "all":
             os.makedirs(args.output_dir, exist_ok=True)
             for press_name in PRESS_CHOICES.keys():
                 print(f"Running press: {press_name}", flush=True)
-                attn_impl_i = "eager" if press_name == "observed_attention" else args.attn_implementation
                 try:
-                    # Optionally compute PPL under each press
+                    # Compute PPL under each press (press-only, fast mode)
                     loss_i, ppl_i = loss, ppl
-                    if not args.speed_only and (args.ppl_apply_press or args.ppl_only_press):
-                        press_for_ppl_i = PRESS_CHOICES.get(press_name)
-                        if press_for_ppl_i is not None and args.compression_ratio is not None:
-                            if hasattr(press_for_ppl_i, "compression_ratio"):
-                                try:
-                                    press_for_ppl_i.compression_ratio = args.compression_ratio
-                                except Exception:
-                                    pass
-                            elif hasattr(press_for_ppl_i, "base_press") and hasattr(press_for_ppl_i.base_press, "compression_ratio"):
-                                try:
-                                    press_for_ppl_i.base_press.compression_ratio = args.compression_ratio
-                                except Exception:
-                                    pass
-                        print(f"Computing perplexity with press: {press_name}", flush=True)
-                        loss_i, ppl_i, _ = compute_ppl(
-                            model,
-                            tokenizer,
-                            text,
-                            device,
-                            max_seq_len=args.max_seq_len,
-                            stride=args.stride,
-                            press=press_for_ppl_i,
-                            attn_impl=attn_impl_i,
-                            ppl_fast=args.ppl_fast,
-                        )
+                    press_for_ppl_i = PRESS_CHOICES.get(press_name)
+                    if press_for_ppl_i is not None and args.compression_ratio is not None:
+                        if hasattr(press_for_ppl_i, "compression_ratio"):
+                            try:
+                                press_for_ppl_i.compression_ratio = args.compression_ratio
+                            except Exception:
+                                pass
+                        elif hasattr(press_for_ppl_i, "base_press") and hasattr(press_for_ppl_i.base_press, "compression_ratio"):
+                            try:
+                                press_for_ppl_i.base_press.compression_ratio = args.compression_ratio
+                            except Exception:
+                                pass
+                    print(f"Computing perplexity with press: {press_name}", flush=True)
+                    loss_i, ppl_i, _ = compute_ppl(
+                        model,
+                        tokenizer,
+                        text,
+                        device,
+                        max_seq_len=args.max_seq_len,
+                        stride=args.stride,
+                        press=press_for_ppl_i,
+                        ppl_fast=True,
+                    )
                     speed_i, peak_mem_i, ctx_tokens_i = measure_speed_memory(
                         model_name=args.model,
                         device=device,
@@ -410,11 +348,9 @@ def main():
                         question=args.question,
                         press_name=press_name,
                         compression_ratio=args.compression_ratio,
-                        attn_impl=attn_impl_i,
                         max_new_tokens=args.max_new_tokens,
                         context_limit=args.context_limit,
                         answer_prefix=args.answer_prefix,
-                        speed_decode_only=args.speed_decode_only,
                         min_new_tokens=args.min_new_tokens,
                     )
                     residual_mem_i = int(torch.cuda.memory_allocated()) if torch.cuda.is_available() else 0
@@ -468,11 +404,9 @@ def main():
             question=args.question,
             press_name=args.press,
             compression_ratio=args.compression_ratio,
-            attn_impl=args.attn_implementation,
             max_new_tokens=args.max_new_tokens,
             context_limit=args.context_limit,
             answer_prefix=args.answer_prefix,
-            speed_decode_only=args.speed_decode_only,
             min_new_tokens=args.min_new_tokens,
         )
         residual_mem = int(torch.cuda.memory_allocated()) if torch.cuda.is_available() else 0
