@@ -13,11 +13,6 @@ from transformers.pipelines import PIPELINE_REGISTRY
 from transformers.pipelines.base import GenericTensor
 
 from kvpress.presses.base_press import BasePress
-from kvpress.presses.decoding_press import DecodingPress
-from kvpress.presses.finch_press import FinchPress
-from kvpress.presses.key_rerotation_press import KeyRerotationPress
-from kvpress.presses.observed_attention_press import ObservedAttentionPress
-from kvpress.presses.prefill_decoding_press import PrefillDecodingPress
 
 logger = logging.getLogger(__name__)
 
@@ -199,10 +194,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         list[str]
             Generated answers for each input question.
         """
-        if isinstance(press, (DecodingPress, PrefillDecodingPress)) and len(input_tensors["questions_ids"]) > 1:
-            raise ValueError(
-                "DecodingPress is not compatible with multiple questions. Please specify a single question."
-            )
+        # Only prefill compression is supported in this simplified pipeline
 
         context_ids = input_tensors["context_ids"].to(self.model.device)
         context_length = context_ids.shape[1]
@@ -212,7 +204,7 @@ class KVPressTextGenerationPipeline(Pipeline):
             cache = DynamicCache()
 
         # We only perform prefill compression if the press is a prefill press
-        perform_prefill_compression = press is not None and not isinstance(press, DecodingPress)
+        perform_prefill_compression = press is not None
         with press(self.model) if perform_prefill_compression else contextlib.nullcontext():
             # Run the base language model (without LM head) for pre-filling across architectures
             base = None
@@ -241,15 +233,14 @@ class KVPressTextGenerationPipeline(Pipeline):
             logger.debug(f"Context Length: {context_length}")
             logger.debug(f"Compressed Context Length: {cache.get_seq_length()}")
 
-        # We only perform decoding compression if the press is a decoding or prefill decoding press
-        perform_decoding_compression = press is not None and isinstance(press, (DecodingPress, PrefillDecodingPress))
+        # Decoding-time compression is not supported in this simplified pipeline
+        perform_decoding_compression = False
         decode_start = time.perf_counter()
         with press(self.model) if perform_decoding_compression else contextlib.nullcontext():
             # Greedy decoding for each question
             answers = []
             for question_ids in input_tensors["questions_ids"]:
-                if isinstance(press, KeyRerotationPress) or (isinstance(press, FinchPress) and press.rerotate_keys):
-                    context_length = cache.get_seq_length()
+                # Use prefill-determined context_length
 
                 cache_seq_lengths = [cache.get_seq_length(layer_idx) for layer_idx in range(len(cache))]
                 answer = self.generate_answer(
@@ -344,10 +335,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         return answer
 
     def output_attentions(self, press: BasePress):
-        if isinstance(press, ObservedAttentionPress):
-            return True
-        if hasattr(press, "press") and isinstance(press.press, ObservedAttentionPress):
-            return True
+        # Observed-attention specific path removed; default to not returning attentions
         return False
 
     def postprocess(self, model_outputs, single_question):

@@ -15,30 +15,7 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers import pipeline
 from transformers import DynamicCache
-from kvpress import (
-    AdaKVPress,
-    BlockPress,
-    ChunkKVPress,
-    CompactorPress,
-    ComposedPress,
-    CriticalAdaKVPress,
-    CriticalKVPress,
-    DecodingPress,
-    DuoAttentionPress,
-    ExpectedAttentionPress,
-    FinchPress,
-    KeyDiffPress,
-    KnormPress,
-    KVzipPress,
-    ObservedAttentionPress,
-    PyramidKVPress,
-    QFilterPress,
-    RandomPress,
-    SnapKVPress,
-    StreamingLLMPress,
-    ThinKPress,
-    TOVAPress,
-)
+from kvpress import KeyDiffPress, KnormPress, RandomPress, StreamingLLMPress
 
 
 PRESS_CHOICES = {
@@ -256,7 +233,7 @@ def main():
     parser.add_argument("--max_new_tokens", type=int, default=800)
     parser.add_argument("--max_seq_len", type=int, default=2048)
     parser.add_argument("--stride", type=int, default=512)
-    parser.add_argument("--output_dir", type=str, default="results/perplexity")
+    parser.add_argument("--output_dir", type=str, default="results")
     parser.add_argument("--context_limit", type=int, default=4096)
     parser.add_argument("--question", type=str, default="Continue the context with a detailed summary of at least 3 sentences.")
     parser.add_argument("--answer_prefix", type=str, default="")
@@ -364,7 +341,7 @@ def main():
                         ppl=ppl_i,
                         press=press_name,
                         compression_ratio=args.compression_ratio,
-                        attn_implementation=args.attn_implementation,
+                        attn_implementation=None,
                         speed_tokens_per_s=speed_i,
                         peak_mem_bytes=peak_mem_i,
                         residual_mem_bytes=residual_mem_i,
@@ -383,7 +360,7 @@ def main():
                         ppl=ppl,
                         press=press_name,
                         compression_ratio=args.compression_ratio,
-                        attn_implementation=args.attn_implementation,
+                        attn_implementation=None,
                         speed_tokens_per_s=None,
                         peak_mem_bytes=None,
                         residual_mem_bytes=None,
@@ -391,7 +368,7 @@ def main():
                         context_tokens_truncated=None,
                         error=str(e),
                     )
-                stem = f"{args.dataset}__{args.subset or 'none'}__{args.model.split('/')[-1]}__{press_name}"
+                stem = f"{args.dataset}__{args.subset or 'none'}__{args.model.split('/')[-1]}__{press_name}__cr{args.compression_ratio}"
                 with open(os.path.join(args.output_dir, stem + ".json"), "w", encoding="utf-8") as f:
                     json.dump(asdict(result_i), f, ensure_ascii=False, indent=2)
                 print(json.dumps(asdict(result_i), ensure_ascii=False, indent=2))
@@ -421,7 +398,7 @@ def main():
         ppl=ppl,
         press=args.press,
         compression_ratio=args.compression_ratio,
-        attn_implementation=args.attn_implementation,
+        attn_implementation=None,
         speed_tokens_per_s=speed,
         peak_mem_bytes=peak_mem,
         residual_mem_bytes=residual_mem,
@@ -431,7 +408,7 @@ def main():
     )
 
     os.makedirs(args.output_dir, exist_ok=True)
-    stem = f"{args.dataset}__{args.subset or 'none'}__{args.model.split('/')[-1]}__{args.press or 'no_press'}"
+    stem = f"{args.dataset}__{args.subset or 'none'}__{args.model.split('/')[-1]}__{args.press or 'no_press'}__cr{args.compression_ratio}"
     with open(os.path.join(args.output_dir, stem + ".json"), "w", encoding="utf-8") as f:
         json.dump(asdict(result), f, ensure_ascii=False, indent=2)
 
