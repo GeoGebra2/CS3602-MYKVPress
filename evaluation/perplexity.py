@@ -232,7 +232,7 @@ def main():
     parser.add_argument("--compression_ratio", type=float, default=0.7)
     parser.add_argument("--max_new_tokens", type=int, default=800)
     parser.add_argument("--max_seq_len", type=int, default=2048)
-    parser.add_argument("--stride", type=int, default=512)
+    parser.add_argument("--stride", type=int, default=2048)
     parser.add_argument("--output_dir", type=str, default="results")
     parser.add_argument("--context_limit", type=int, default=4096)
     parser.add_argument("--question", type=str, default="Continue the context with a detailed summary of at least 3 sentences.")
