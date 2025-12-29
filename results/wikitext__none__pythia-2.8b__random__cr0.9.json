@@ -1,0 +1,18 @@
+{
+  "model": "EleutherAI/pythia-2.8b",
+  "dataset": "wikitext",
+  "subset": null,
+  "sample_idx": null,
+  "tokens": 286220,
+  "loss": 2.330233097076416,
+  "ppl": 10.280337570410179,
+  "press": "random",
+  "compression_ratio": 0.9,
+  "attn_implementation": null,
+  "speed_tokens_per_s": 0.709960401152672,
+  "peak_mem_bytes": 17122145792,
+  "residual_mem_bytes": 11180327936,
+  "context_tokens": 286220,
+  "context_tokens_truncated": 4096,
+  "error": null
+}
