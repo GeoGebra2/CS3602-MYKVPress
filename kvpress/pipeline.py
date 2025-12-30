@@ -306,12 +306,18 @@ class KVPressTextGenerationPipeline(Pipeline):
         ).unsqueeze(0)
 
         # if the user doesn't provide a question, skip forward pass
+        ttft_start = time.perf_counter()
         outputs = self.model(
             input_ids=question_ids.to(self.model.device),
             past_key_values=cache,
             position_ids=position_ids,
             num_logits_to_keep=1,
         )
+        try:
+            ttft_end = time.perf_counter()
+            self._last_ttft_seconds = ttft_end - ttft_start
+        except Exception:
+            self._last_ttft_seconds = None
 
         position_ids = position_ids[:, -1:] + 1
         generated_ids = [outputs.logits[0, -1].argmax()]

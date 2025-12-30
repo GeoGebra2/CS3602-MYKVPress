@@ -40,10 +40,15 @@ class EvalResult:
     compression_ratio: float | None
     attn_implementation: str | None
     speed_tokens_per_s: float | None
+    throughput_tokens_per_s: float | None
     peak_mem_bytes: int | None
     residual_mem_bytes: int | None
     context_tokens: int | None
     context_tokens_truncated: int | None
+    ttft_seconds: float | None
+    tpot_ms: float | None
+    total_flops: float | None
+    avg_flops_per_token: float | None
     error: str | None
 
 
@@ -182,7 +187,7 @@ def measure_speed_memory(
     answer_prefix: str | None = None,
     speed_decode_only: bool = True,
     min_new_tokens: int = 0,
-) -> tuple[float, int, int]:
+) -> dict:
     model_kwargs = {}
     pipe = pipeline("kv-press-text-generation", model=model_name, device=device, model_kwargs=model_kwargs)
     press = None
@@ -218,7 +223,37 @@ def measure_speed_memory(
     tok_per_s = len(generated) / elapsed if elapsed > 0 else float("nan")
     peak_mem = torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
     ctx_len = pipe.tokenizer.encode(context, add_special_tokens=False)
-    return tok_per_s, peak_mem, len(ctx_len)
+    ttft = getattr(pipe, "_last_ttft_seconds", None)
+    tpot = (decode_elapsed / len(generated) * 1000) if (decode_elapsed and len(generated) > 0) else None
+    def estimate_flops(cfg, ctx_tokens: int, gen_tokens: int):
+        h = getattr(cfg, "hidden_size", None)
+        L = getattr(cfg, "num_hidden_layers", None)
+        if h is None or L is None:
+            return None, None
+        proj_out = 4 * h * h
+        mlp = 8 * h * h
+        attn_decode = 4 * h * min(ctx_tokens, context_limit)
+        per_layer_decode = proj_out + mlp + attn_decode
+        decode_total = gen_tokens * L * per_layer_decode
+        n = min(ctx_tokens, context_limit)
+        attn_prefill = 4 * h * (n * (n + 1) // 2)
+        prefill_total = L * (n * (proj_out + mlp) + attn_prefill)
+        total = float(decode_total + prefill_total)
+        avg = float(total / max(gen_tokens, 1))
+        return total, avg
+    total_flops, avg_flops = estimate_flops(pipe.model.config, len(ctx_len), len(generated))
+    return {
+        "tok_per_s": tok_per_s,
+        "peak_mem": peak_mem,
+        "ctx_tokens": len(ctx_len),
+        "ttft_seconds": ttft,
+        "tpot_ms": tpot,
+        "throughput_tokens_per_s": tok_per_s,
+        "total_flops": total_flops,
+        "avg_flops_per_token": avg_flops,
+        "generated_tokens": len(generated),
+        "decode_elapsed_seconds": decode_elapsed,
+    }
 
 
 def main():
@@ -284,7 +319,7 @@ def main():
         )
         print(f"Perplexity computed. Loss={loss:.4f}, PPL={ppl:.4f}", flush=True)
 
-    speed, peak_mem, ctx_tokens = None, None, None
+    metrics = None
     residual_mem = None
     if args.press is not None:
         # Support batch run across all presses
@@ -318,7 +353,7 @@ def main():
                         press=press_for_ppl_i,
                         ppl_fast=True,
                     )
-                    speed_i, peak_mem_i, ctx_tokens_i = measure_speed_memory(
+                    metrics_i = measure_speed_memory(
                         model_name=args.model,
                         device=device,
                         context=text,
@@ -342,11 +377,16 @@ def main():
                         press=press_name,
                         compression_ratio=args.compression_ratio,
                         attn_implementation=None,
-                        speed_tokens_per_s=speed_i,
-                        peak_mem_bytes=peak_mem_i,
+                        speed_tokens_per_s=metrics_i.get("tok_per_s"),
+                        throughput_tokens_per_s=metrics_i.get("throughput_tokens_per_s"),
+                        peak_mem_bytes=metrics_i.get("peak_mem"),
                         residual_mem_bytes=residual_mem_i,
-                        context_tokens=ctx_tokens_i,
-                        context_tokens_truncated=min(ctx_tokens_i or 0, args.context_limit),
+                        context_tokens=metrics_i.get("ctx_tokens"),
+                        context_tokens_truncated=min(metrics_i.get("ctx_tokens") or 0, args.context_limit),
+                        ttft_seconds=metrics_i.get("ttft_seconds"),
+                        tpot_ms=metrics_i.get("tpot_ms"),
+                        total_flops=metrics_i.get("total_flops"),
+                        avg_flops_per_token=metrics_i.get("avg_flops_per_token"),
                         error=None,
                     )
                 except Exception as e:
@@ -362,10 +402,15 @@ def main():
                         compression_ratio=args.compression_ratio,
                         attn_implementation=None,
                         speed_tokens_per_s=None,
+                        throughput_tokens_per_s=None,
                         peak_mem_bytes=None,
                         residual_mem_bytes=None,
                         context_tokens=None,
                         context_tokens_truncated=None,
+                        ttft_seconds=None,
+                        tpot_ms=None,
+                        total_flops=None,
+                        avg_flops_per_token=None,
                         error=str(e),
                     )
                 stem = f"{args.dataset}__{args.subset or 'none'}__{args.model.split('/')[-1]}__{press_name}__cr{args.compression_ratio}"
@@ -374,7 +419,7 @@ def main():
                 print(json.dumps(asdict(result_i), ensure_ascii=False, indent=2))
             return
         # Single press path
-        speed, peak_mem, ctx_tokens = measure_speed_memory(
+        metrics = measure_speed_memory(
             model_name=args.model,
             device=device,
             context=text,
@@ -399,11 +444,16 @@ def main():
         press=args.press,
         compression_ratio=args.compression_ratio,
         attn_implementation=None,
-        speed_tokens_per_s=speed,
-        peak_mem_bytes=peak_mem,
+        speed_tokens_per_s=metrics.get("tok_per_s") if metrics is not None else None,
+        throughput_tokens_per_s=metrics.get("throughput_tokens_per_s") if metrics is not None else None,
+        peak_mem_bytes=metrics.get("peak_mem") if metrics is not None else None,
         residual_mem_bytes=residual_mem,
-        context_tokens=ctx_tokens,
-        context_tokens_truncated=min(ctx_tokens or 0, args.context_limit),
+        context_tokens=metrics.get("ctx_tokens") if metrics is not None else None,
+        context_tokens_truncated=min((metrics.get("ctx_tokens") if metrics is not None else 0) or 0, args.context_limit),
+        ttft_seconds=metrics.get("ttft_seconds") if metrics is not None else None,
+        tpot_ms=metrics.get("tpot_ms") if metrics is not None else None,
+        total_flops=metrics.get("total_flops") if metrics is not None else None,
+        avg_flops_per_token=metrics.get("avg_flops_per_token") if metrics is not None else None,
         error=None,
     )
 
