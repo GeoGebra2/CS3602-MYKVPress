@@ -1,0 +1,23 @@
+{
+  "model": "EleutherAI/pythia-2.8b",
+  "dataset": "pg19_local",
+  "subset": null,
+  "sample_idx": null,
+  "tokens": 26178,
+  "loss": 2.4533138275146484,
+  "ppl": 11.626812200214909,
+  "press": "keydiff",
+  "compression_ratio": 0.5,
+  "attn_implementation": null,
+  "speed_tokens_per_s": 0.49548106763332506,
+  "throughput_tokens_per_s": 0.49548106763332506,
+  "peak_mem_bytes": 17685547008,
+  "residual_mem_bytes": 11178247680,
+  "context_tokens": 26178,
+  "context_tokens_truncated": 4096,
+  "ttft_seconds": 3.803347599983681,
+  "tpot_ms": 2018.240585410295,
+  "total_flops": 14326903603200.0,
+  "avg_flops_per_token": 43546819462.61398,
+  "error": null
+}
